@@ -1,0 +1,18 @@
+  -*- Mode: text; fill-column: 90 -*-
+
+ o Even though the documentation is clear (1970, 1973, and 1982 manuals) that shifts and
+   rotates move modulo 2^8, that is no more than 255, the diagnostics make it clear that a
+   rotate of -256 should move 256 positions to the right.
+
+ o SOS and SOJ do not subtract one, they add -1.  This makes the arithmetic flags work out
+   right.
+
+ o The documentation differs between the manuals but it appears that none of them are
+   correct with regards to detecting overflow in the DIV instruction.  I don't know yet
+   what the correct algorithm is.
+ 
+   The best I have is this.  Use the description in the 1983 manual to detect overflow
+   before you start but then at the end, check that the sign bits for the dividend,
+   divisor, and quotient all match.  If not, signal overflow except if the quotient is 0.
+   This doesn't pass the diagnostics but I think it's correct.
+ 
