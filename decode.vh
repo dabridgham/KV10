@@ -5,35 +5,38 @@
 
 // Dispatch values
 localparam
-  Common = 0, // instructions that don't need special microcode handling
-  Unassigned = 1,		// unassigned opcode
-  Test = 2,			// Test instructions
-  Exch = 3,			// EXCH needs an extra cycle
-  Jrst = 4,
-  Jfcl = 5,
-  Jsr = 6,
-  Jsp = 7,
-  Jsa = 8,
-  Jra = 9,
-  Xct = 10,
-  Pushj = 11,
-  Push = 12,
-  Pop = 13,
-  Popj = 14,
-  ShiftC = 15,
+  dCommon = 0, // instructions that don't need special microcode handling
+  dUnassigned = 1,		// unassigned opcode
+  dTEST = 2,			// Test instructions
+  dEXCH = 3,			// EXCH needs an extra cycle
+  dJRST = 4,
+  dJFCL = 5,
+  dJSR = 6,
+  dJSP = 7,
+  dJSA = 8,
+  dJRA = 9,
+  dXCT = 10,
+  dPUSHJ = 11,
+  dPUSH = 12,
+  dPOP = 13,
+  dPOPJ = 14,
+  dSHIFTC = 15,
+  dJFFO = 16,
+  dBLT = 17,
 
-  Mul = 20,
-  IMul = 21,
-  Div = 22,
-  IDiv = 23,
-  Ldb = 24,
-  Dpb = 25,
-  Ildb = 26,
-  Idpb = 27,
+  dMUL = 20,
+  dIMUL = 21,
+  dDIV = 22,
+  dIDIV = 23,
+  dLDB = 24,
+  dDPB = 25,
+  dILDB = 26,
+  dIDPB = 27,
      
-  IOread = 28,
-  IOwrite = 29,
-  MUUO = 31;
+  dIOread = 28,
+  dIOwrite = 29,
+
+  dMUUO = 31;
 
 // Skip conditions
 localparam

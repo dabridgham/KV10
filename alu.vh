@@ -1,75 +1,66 @@
-// ALU defines	-*- mode: Verilog; fill-column: 90 -*-
+// ALU definitions	-*- mode: Verilog; fill-column: 90 -*-
 //
 // 2013-01-31 dab	initial version
 
 
 // ALU commands
 
+// how big a word do I need to contain all the alu commands? !!!
+`define aluCMDwidth 6
+`define aluCMD `aluCMDwidth-1:0
+
 // the logical operations are 0 to 15 as they're mapped directly from four bits of the
 // opcode
-`define aluSETZ 0
-`define aluAND 1
-`define aluANDCA 2
-`define aluSETM 3
-`define aluANDCM 4
-`define aluSETA 5
-`define aluXOR 6
-`define aluIOR 7
-`define aluANDCB 8
-`define aluEQV 9
-`define aluSETCA 10
-`define aluORCA 11
-`define aluSETCM 12
-`define aluORCM 13
-`define aluORCB 14
-`define aluSETO 15
+`define aluSETZ `aluCMDwidth'd0
+`define aluAND `aluCMDwidth'd1
+`define aluANDCA `aluCMDwidth'd2
+`define aluSETM `aluCMDwidth'd3
+`define aluANDCM `aluCMDwidth'd4
+`define aluSETA `aluCMDwidth'd5
+`define aluXOR `aluCMDwidth'd6
+`define aluIOR `aluCMDwidth'd7
+`define aluANDCB `aluCMDwidth'd8
+`define aluEQV `aluCMDwidth'd9
+`define aluSETCA `aluCMDwidth'd10
+`define aluORCA `aluCMDwidth'd11
+`define aluSETCM `aluCMDwidth'd12
+`define aluORCM `aluCMDwidth'd13
+`define aluORCB `aluCMDwidth'd14
+`define aluSETO `aluCMDwidth'd15
 
-`ifdef NOTDEF
-// as these half-word ALU commands are extracted directly from the opcode, they must be in
-// this order and aluHLL mod 4 must equal 0
-`define aluHLL 16
-`define aluHRL 17
-`define aluHRR 18
-`define aluHLR 19
-`define aluHLLx 20		// sign-extend
-`define aluHRLx 21
-`define aluHRRx 22
-`define aluHLRx 23
-`else // !`ifdef NOTDEF
- `define aluLL1 16
- `define aluLL2 17
- `define aluRL1 18
- `define aluRL2 19
+// Halfword operations
+`define aluHMN `aluCMDwidth'd16	// LEFT(M),RIGHT(A)
+`define aluHMZ `aluCMDwidth'd17	// LEFT(M),0
+`define aluHMO `aluCMDwidth'd18	// LEFT(M),-1
+`define aluHME `aluCMDwidth'd19	// LEFT(M),sign(A)
 
- `define aluRR1 17		// RR1 = LL2
- `define aluRR2 16		// RR2 = LL1
- `define aluLR1 19		// LR1 = RL2 iff op1 and op2 are swapped
- `define aluLR2 18		// LR2 = RL1 iff op1 and op2 are swapped
+`define aluADD `aluCMDwidth'd20	      // A+M
+`define aluSUB `aluCMDwidth'd21	      // A-M
+`define aluMAGNITUDE `aluCMDwidth'd22 // |M|
+`define aluNEGATE `aluCMDwidth'd23    // -M
 
- `define aluRDUP2 20
-`endif
+`define aluLSH `aluCMDwidth'd24	 // A << M (logical)
+`define aluASH `aluCMDwidth'd25	 // A << M (arithmetic)
+`define aluROT `aluCMDwidth'd26	 // A << M (rotate)
+`define aluLSHC `aluCMDwidth'd27 // A,Alow << M (logical)
+`define aluASHC `aluCMDwidth'd28 // A,Alow << M (arithmetic)
+`define aluROTC `aluCMDwidth'd29 // A,Alow << M (rotate)
+`define aluCIRC `aluCMDwidth'd30 // Circulate (not really implemented (yet?))
+`define aluJFFO `aluCMDwidth'd31 // calculate number of leading zeros in A
 
-`define aluADD 24
-`define aluSUB 25
+`define aluIBP `aluCMDwidth'd35	    // increment byte pointer in M
+`define aluSETAlow `aluCMDwidth'd36 // Swap A and Alow
 
-`define aluLSH 29
-`define aluASH 30
-`define aluROT 31
+`define aluAOB `aluCMDwidth'd37	// add one to both halves
+`define aluSOB `aluCMDwidth'd38	// subtract one from both halves
 
-`define aluLSHC 33
-`define aluASHC 34
-`define aluROTC 35
-`define aluCIRC 36
+`define aluMUL_ADD `aluCMDwidth'd39 // add and shift (for multiplication)
+`define aluMUL_SUB `aluCMDwidth'd40 // subtract and shift (for MUL)
+`define aluIMUL_SUB `aluCMDwidth'd41 // subtract and shift (for IMUL)
+`define aluDIV_MAG72 `aluCMDwidth'd42 // initial 72-bit negate for DIV
+`define aluDIV_MAG36 `aluCMDwidth'd43 // initial 36-bit negate for IDIV
+`define aluDIV_OP `aluCMDwidth'd44    // add or subtract and ROTC with a sign change
+`define aluDIV_FIXR `aluCMDwidth'd45  // un-Rotate A
+`define aluDIV_FIXUP `aluCMDwidth'd46  // fixup for negative dividend
 
-`define aluMAGNITUDE 37		// find magnitude of op2
-`define aluSWAP 38		// swap half-words in op2
-`define aluNEGATE 39		// negate op2
-
-`define aluIBP 40		// increment byte pointer in op2
-
-`define aluAOB 43		// add one to both halves
-`define aluSOB 44		// subtract one from both halves
-
-// how big a word do I need to contain all the alu commands
-`define aluCMDwidth 6
-
+`define aluDPB `aluCMDwidth'd47	// do the masking for Deposit Byte

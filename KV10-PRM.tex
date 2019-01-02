@@ -59,8 +59,8 @@
 \maketitle
 
 \begin{abstract}
-This document describes the KV10 processor by describing how it differs from Dave Conroy's
-PDP-10/X.
+This document describes the KV10 processor, an implementation of the DEC PDP-10
+architecture.  Much of the description is how it differs from Dave Conroy's PDP-10/X.
 \end{abstract}
 
 \tableofcontents
@@ -69,8 +69,8 @@ PDP-10/X.
 The KV10 is an implementation of the Digital Equipment Corporation's PDP-10 architecture,
 written in Verilog, and realized (thus far) on an FPGA. It mostly follows the PDP-10/X
 architecture, designed by Dave Conroy and described in his \textit{PDP-10/X System
-  Manual}\cite{conroykx10}, and, like Dave's design, is initially targeted at supporting
-the Incompatible Timesharing System (ITS) from MIT.
+  Manual}\cite{conroykx10}, and, like Dave's design, is targeted at supporting the
+Incompatible Timesharing System (ITS) from MIT.
 
 For now, this document is woefully incomplete.  It contains a mix of things I've done,
 things I plan to do, and flights of fancy about where this project could go one day.  It
@@ -200,10 +200,10 @@ for the KV10.\footnote{The console should be optional but I'll have to figure ou
 
 This implementation of the PDP-10 architecture is called the KV10. As mentioned above, it
 was designed explicitly to run the ITS operating system, namely with a KA-like interrupt
-system and the MIT Paging Box (also \code{CIRC} and one-proceed (yet to be
-implemented)). However, being implemented in Verilog, it will be fairly
-straightforward to have variations such as extra instructions, different paging hardware,
-and extended memory so it can run TOPS-20.
+system\footnote{I'm considering adding some of the interrupt system from the KI10} and the
+MIT Paging Box (also \code{CIRC} and one-proceed (yet to be implemented)). However, being
+implemented in Verilog, it will be fairly straightforward to have variations such as extra
+instructions, different paging hardware, and extended memory so it can run TOPS-20.
 
 The exact combination of compile options as well as the version of the code used are 
 identified by option codes following the name.
@@ -257,7 +257,7 @@ Computers include a realization of the processor, some memory, plus a set of sup
 I/O devices and are named separately from all of those.  The initial realization, only run
 a few times, was on a Terasic DE2-115 FPGA board and called Trilobyte.  The current
 intention is to design and build a daughter card to go with the ZTEX 2.13 FPGA module
-providing a useful set of I/O ports.  This will be called Amonite.
+providing a useful set of I/O ports.  This will be called Ammonite.
 
 
 \chapter{APR}
@@ -342,7 +342,8 @@ classes of instruction that have different effects when used as an interrupt ins
     this requires specific code to be added for each instruction that skips, I may or may
     not add the capability to other instructions.
   \item[everything else] Instructions that normally proceed to the next instruction take
-    their action then dismiss the interrupt and return to the interrupted program.
+    their action then dismiss the interrupt and return to the interrupted program.  This
+    differs from the KA10 but is like the KI10 and later models.
 \end{description}
 
 \subsection{Unassigned Codes}
@@ -358,27 +359,27 @@ is controlled through the \texttt{UAC} option in \texttt{constants.vh}.  Definin
 
 \subsection{Errors}
 
-The KX10 defines hard errors as coming from I/O operations non-existent devices.  The KV10
-may also generate hard errors on accessing non-existent memory if the MEM module is
+The KX10 defines hard errors as coming from I/O operations to non-existent devices.  The
+KV10 may also generate hard errors on accessing non-existent memory if the MEM module is
 capable of detecting and signaling this condition.
 
 \chapter{Input / Output}
 
 \section{BLKI}
 
-On some devices, \code{BLKI} works a little differently than on most PDP-10s.  Normally
-\code{BLKI} skips if the count in the left half of location \code{E} is not zero so
+On some I/O devices, \code{BLKI} works a little differently than on most PDP-10s.  Normally
+\code{BLKI} skips only if the count in the left half of location \code{E} is not zero so
 not-skipping indicates the read buffer is full and reading is finished.  However, in some
 cases the I/O device may know better than the software when the end is reached.  These
 devices may notify the APR they've reached the end and this will cause \code{BLKI} to not
-skip even though the count has not reached 0.
+skip even though the count has not yet reached 0.
 
 An example of this might be an Ethernet device.  It can start delivering data to the
 processor before it knows the length of the packet so a device driver that wanted to use
-\code{BLKI} would not know how many words to set up in its block.  With this modification,
-when either the end of the packet or the end of the buffer is reached, \code{BLKI} doesn't
-skip.  The code outside of the \code{BLKI} loop then needs to check why it was reached, if
-it was end of packet or buffer overflow.
+\code{BLKI} as the interrupt instruction would not know how many words to set up in its
+block.  With this modification, when either the end of the packet or the end of the buffer
+is reached, \code{BLKI} doesn't skip.  The code outside of the \code{BLKI} loop then needs
+to check why it was reached, if it was end of packet or buffer overflow.
 
 \section{I/O Devices}
 

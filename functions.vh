@@ -93,33 +93,33 @@ endfunction
 //
 //  pull apart instructions - all these numeric constants annoy me!
 //
-function [0:8] OP;
+function [0:8] instOP;
    input [`WORD]   op;
-   OP = op[0:8];
+   instOP = op[0:8];
 endfunction
-function [0:3] A;
+function [0:3] instA;
    input [`WORD]   op;
-   A = op[9:12];
+   instA = op[9:12];
 endfunction
-function I;
+function instI;
    input [`WORD]   op;
-   I = op[13];
+   instI = op[13];
 endfunction
-function [0:3] X;
+function [0:3] instX;
    input [`WORD]   op;
-   X = op[14:17];
+   instX = op[14:17];
 endfunction
-function [0:17] Y;
+function [0:17] instY;
    input [`WORD]   op;
-   Y = op[18:35];
+   instY = op[18:35];
 endfunction
-function [0:6] IODEV;
+function [0:6] instIODEV;
    input [`WORD]   op;
-   IODEV = op[3:9];
+   instIODEV = op[3:9];
 endfunction
-function [0:2] IOOP;
+function [0:2] instIOOP;
    input [`WORD]   op;
-   IOOP = op[10:12];
+   instIOOP = op[10:12];
 endfunction
 
 
@@ -141,7 +141,7 @@ function [0:0] U;		// unused
 endfunction
 function [0:17] Yinc;		// increment Y
    input [`WORD] w;
-   Yinc = Y(w) + `HALFSIZE'd1;
+   Yinc = instY(w) + `HALFSIZE'd1;
 endfunction
 
 function [0:5] PlessS;		// position - size
@@ -202,7 +202,7 @@ function [`WORD] bp_mask;	// maps a size to a mask
      'o40: bp_mask = `WORDSIZE'o037777777777;
      'o41: bp_mask = `WORDSIZE'o077777777777;
 
-     'o42: bp_mask = `WORDSIZE'o107777777777;
+     'o42: bp_mask = `WORDSIZE'o177777777777;
      'o43: bp_mask = `WORDSIZE'o377777777777;
      default: bp_mask = `WORDSIZE'o777777777777;
    endcase // case (size)

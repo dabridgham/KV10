@@ -29,7 +29,7 @@ module decode
    output reg [0:2] 	condition_code, // jump or skip condition
    output reg 		Comp0, // use jump_condition_0 instead of jump_condition
    output reg 		jump, // jump instead of skip (if the condition_code hits)
-   output reg 		io_conditions	// conditions/data (will move to be a port on the module!!!)
+   output [`ADDR] 	io_dev	// the I/O device
    );
 
 `include "opcodes.vh"
@@ -39,9 +39,14 @@ module decode
      no = 1'b0,
      yes = 1'b1;
 
+   // build up an address for I/O devices from the device field in the
+   // instruction and whether it's a data or conditions operation
+   reg 			io_conditions;
+   assign io_dev = { 9'b0, instIODEV(inst), 1'b0, io_conditions };
+
    always @(*) begin
       // defaults
-      dispatch = Common;
+      dispatch = dCommon;
       ALUinst = `aluSETA;
       ReadE = 0;
       ReadAC = 0;
@@ -66,14 +71,14 @@ module decode
 	LUUO10, LUUO11, LUUO12, LUUO13, LUUO14, LUUO15, LUUO16, LUUO17,
 	LUUO20, LUUO21, LUUO22, LUUO23, LUUO24, LUUO25, LUUO26, LUUO27,
 	LUUO30, LUUO31, LUUO32, LUUO33, LUUO34, LUUO35, LUUO36, LUUO37:
-	  dispatch = MUUO;
+	  dispatch = dMUUO;
 	  
 	UUO00, 		  
 	CALL, INITI, MUUO42, MUUO43, MUUO44, MUUO45, MUUO46, CALLI,
 	OPEN, TTCALL, MUUO52, MUUO53, MUUO54, RENAME, IN, OUT,
 	SETSTS, STATO, STATUS, GETSTS, INBUF, OUTBUF, INPUT, OUTPUT,
 	CLOSE, RELEAS, MTAPE, UGETF, USETI, USETO, LOOKUP, ENTER:
-	  dispatch = MUUO;
+	  dispatch = dMUUO;
 
 	UJEN, UNK101, GFAD, GFSB, JSYS, ADJSP, GFMP, GFDV,
 	DFAD, DFSB, DFMP, DFDV, DADD, DSUB, DMUL, DDIV,
@@ -83,7 +88,7 @@ module decode
 	FSB, FSBL, FSBM, FSBB, FSBR, FSBRL, FSBRM, FSBRB,
 	FMP, FMPL, FMPM, FMPB, FMPR, FMPRL, FMPRM, FMPRB,
 	FDV, FDVL, FDVM, FDVB, FDVR, FDVRL, FDVRM, FDVRB:
-	  dispatch = Unassigned;
+	  dispatch = dUnassigned;
 
 	//
 	// Full Word MOVE instructions
@@ -129,25 +134,25 @@ module decode
 	// Integer Multiply and Divide
 	//
 
-	IMUL: { dispatch, ReadE, WriteE, WriteAC, SetFlags } = { IMul, yes, no, yes, yes };
-	IMULI: { dispatch, ReadE, WriteE, WriteAC, SetFlags } = { IMul, no, no, yes, yes };
-	IMULM: { dispatch, ReadE, WriteE, WriteAC, SetFlags } = { IMul, yes, yes, no, yes };
-	IMULB: { dispatch, ReadE, WriteE, WriteAC, SetFlags } = { IMul, yes, yes, yes, yes };
+	IMUL: { dispatch, ReadE, WriteE, WriteAC, SetFlags } = { dIMUL, yes, no, yes, yes };
+	IMULI: { dispatch, ReadE, WriteE, WriteAC, SetFlags } = { dIMUL, no, no, yes, yes };
+	IMULM: { dispatch, ReadE, WriteE, WriteAC, SetFlags } = { dIMUL, yes, yes, no, yes };
+	IMULB: { dispatch, ReadE, WriteE, WriteAC, SetFlags } = { dIMUL, yes, yes, yes, yes };
 
-	MUL: { dispatch, ReadE, WriteE, WriteAC, SetFlags } = { Mul, yes, no, yes, yes };
-	MULI: { dispatch, ReadE, WriteE, WriteAC, SetFlags } = { Mul, no, no, yes, yes };
-	MULM: { dispatch, ReadE, WriteE, WriteAC, SetFlags } = { Mul, yes, yes, no, yes };
-	MULB: { dispatch, ReadE, WriteE, WriteAC, SetFlags } = { Mul, yes, yes, yes, yes };
+	MUL: { dispatch, ReadE, WriteE, WriteAC, SetFlags } = { dMUL, yes, no, yes, yes };
+	MULI: { dispatch, ReadE, WriteE, WriteAC, SetFlags } = { dMUL, no, no, yes, yes };
+	MULM: { dispatch, ReadE, WriteE, WriteAC, SetFlags } = { dMUL, yes, yes, no, yes };
+	MULB: { dispatch, ReadE, WriteE, WriteAC, SetFlags } = { dMUL, yes, yes, yes, yes };
 	
-	IDIV: {dispatch, ReadE, WriteE, WriteAC, SetFlags } = { IDiv, yes, no, yes, yes };
-	IDIVI: {dispatch, ReadE, WriteE, WriteAC, SetFlags } = { IDiv, no, no, yes, yes };
-	IDIVM: {dispatch, ReadE, WriteE, WriteAC, SetFlags } = { IDiv, yes, yes, no, yes };
-	IDIVB: {dispatch, ReadE, WriteE, WriteAC, SetFlags } = { IDiv, yes, yes, yes, yes };
+	IDIV: {dispatch, ReadE, WriteE, WriteAC, SetFlags } = { dIDIV, yes, no, yes, yes };
+	IDIVI: {dispatch, ReadE, WriteE, WriteAC, SetFlags } = { dIDIV, no, no, yes, yes };
+	IDIVM: {dispatch, ReadE, WriteE, WriteAC, SetFlags } = { dIDIV, yes, yes, no, yes };
+	IDIVB: {dispatch, ReadE, WriteE, WriteAC, SetFlags } = { dIDIV, yes, yes, yes, yes };
 	
-	DIV: {dispatch, ReadE, WriteE, WriteAC, SetFlags } = { Div, yes, no, yes, yes };
-	DIVI: {dispatch, ReadE, WriteE, WriteAC, SetFlags } = { Div, no, no, yes, yes };
-	DIVM: {dispatch, ReadE, WriteE, WriteAC, SetFlags } = { Div, yes, yes, no, yes };
-	DIVB: {dispatch, ReadE, WriteE, WriteAC, SetFlags } = { Div, yes, yes, yes, yes };
+	DIV: {dispatch, ReadE, WriteE, WriteAC, SetFlags } = { dDIV, yes, no, yes, yes };
+	DIVI: {dispatch, ReadE, WriteE, WriteAC, SetFlags } = { dDIV, no, no, yes, yes };
+	DIVM: {dispatch, ReadE, WriteE, WriteAC, SetFlags } = { dDIV, yes, yes, no, yes };
+	DIVB: {dispatch, ReadE, WriteE, WriteAC, SetFlags } = { dDIV, yes, yes, yes, yes };
 	
 	//
 	// Shifts and Rotates
@@ -156,23 +161,18 @@ module decode
 	ASH: { ALUinst, WriteAC, SetFlags } = { `aluASH, yes, yes };
 	ROT: { ALUinst, WriteAC, SetFlags } = { `aluROT, yes, no };
 	LSH: { ALUinst, WriteAC, SetFlags } = { `aluLSH, yes, no };
-`ifdef NOTDEF
-	JFFO: decodec(ALUstep, `aluLSHC, `ZERO, 0, none, none, none); // left shift
-`endif
-	ASHC: { dispatch, ALUinst, SetFlags } = { ShiftC, `aluASHC, yes };
-	ROTC: { dispatch, ALUinst} = { ShiftC, `aluROTC };
-	LSHC: { dispatch, ALUinst} = { ShiftC, `aluLSHC };
+	JFFO: dispatch = dJFFO;
+	ASHC: { dispatch, ALUinst, SetFlags } = { dSHIFTC, `aluASHC, yes };
+	ROTC: { dispatch, ALUinst} = { dSHIFTC, `aluROTC };
+	LSHC: { dispatch, ALUinst} = { dSHIFTC, `aluLSHC };
 `ifdef CIRC
 	CIRC: decodec(ALUstep, `aluCIRC, E_word, 0, none, none, none); // I need to write a diagnostic for CIRC !!!
 `endif
 
 	EXCH:			// Exchange, AC <-> C(E)
-	  { dispatch, ALUinst, ReadE, WriteE } = { Exch, `aluSETA, yes, yes };
-
-`ifdef NOTDEF
-	BLT:			// Block Transfer (the ALU is incrementing the pointers)
-	  decode(AC_inst, `aluAOB, `ZERO, 0, none, blt_read, none);
-`endif
+	  { dispatch, ALUinst, ReadE, WriteE } = { dEXCH, `aluSETA, yes, yes };
+	BLT:			// Block Transfer
+	  dispatch = dBLT;
 	
 	AOBJP:			// Add One to Both halves of AC, Jump if Positive
 	  { ALUinst, WriteAC, condition_code, Comp0, jump } = { `aluAOB, yes, skipge, yes, yes };
@@ -180,11 +180,11 @@ module decode
 	  { ALUinst, WriteAC, condition_code, Comp0, jump } = { `aluAOB, yes, skipl, yes, yes };
 
 	JRST:			// Jump and Restory Flags
-	  dispatch = Jrst;
+	  dispatch = dJRST;
 	JFCL:			// Jump on Flag and Clear
-	  dispatch = Jfcl;
+	  dispatch = dJFCL;
 	XCT: // Execute instruction at E (I don't read E here as it would read in the wrong mode)
-	  dispatch = Xct;
+	  dispatch = dXCT;
 
 	
 `ifdef NOTDEF
@@ -192,22 +192,22 @@ module decode
 `endif
 
 	PUSHJ:			// Push down and Jump: AC <- aob(AC) then C(AC) <- PSW,PC
-	  dispatch = Pushj;
+	  dispatch = dPUSHJ;
 	PUSH:			// AC <- aob(AC) then C(AC) <- C(E)
-	  dispatch = Push;
+	  dispatch = dPUSH;
 	POP:			// C(E) <- C(AC) then AC <- sob(AC)
-	  dispatch = Pop;
+	  dispatch = dPOP;
 	POPJ:			// Pop up and Jump: 
-	  dispatch = Popj;
+	  dispatch = dPOPJ;
 
 	JSR: 			// Jump to Subroutine: C(E) <- PSW,PC  PC <- E+1
-	  dispatch = Jsr;
+	  dispatch = dJSR;
 	JSP:			// Jump and Save PC: AC <- PSW,PC  PC <- E
-	  dispatch = Jsp;
+	  dispatch = dJSP;
 	JSA:			// Jump and Save AC: C(E) <- AC  AC <- E,PC  PC <- E+1
-	  dispatch = Jsa;
+	  dispatch = dJSA;
 	JRA:			// Jump and Restore AC: AC <- C(left(AC))  PC <- E
-	  dispatch = Jra;
+	  dispatch = dJRA;
 
 	ADD:			// AC <- AC + C(E)
 	  { ReadE, ALUinst, SetFlags, WriteAC } = { yes, `aluADD, yes, yes };
@@ -376,13 +376,13 @@ module decode
 	IBP:			// Increment Byte Pointer
 	  { ALUinst, ReadE, WriteE } = { `aluIBP, yes, yes };
 	LDB:			// Load Byte
-	  { dispatch, ReadE } = { Ldb, yes };
+	  { dispatch, ReadE } = { dLDB, yes };
 	ILDB:			// Increment and Load Byte
-	  { dispatch, ReadE, WriteE } = { Ildb, yes, yes };
+	  { dispatch, ReadE, WriteE } = { dILDB, yes, yes };
 	DPB:			// Deposit Byte
-	  { dispatch, ReadE } = { Dpb, yes };
+	  { dispatch, ReadE } = { dDPB, yes };
 	IDPB:			// Increment and Deposit Byte
-	  { dispatch, ReadE, WriteE } = { Idpb, yes, yes };
+	  { dispatch, ReadE, WriteE } = { dIDPB, yes, yes };
 
 	SKIP: { ALUinst, ReadE, WriteSelf, condition_code, Comp0 } = { `aluSETM, yes, yes, skip_never, yes };
 	SKIPL: { ALUinst, ReadE, WriteSelf, condition_code, Comp0 } = { `aluSETM, yes, yes, skipl, yes };
@@ -490,7 +490,7 @@ module decode
 	// N - skip if any masked bit is 1
 
 	// repurpose condition_code here
-`define TEST(alu, reade, mswap, writea, cc) { dispatch, ALUinst, ReadE, Mswap, WriteAC, condition_code } = { Test, alu, reade, mswap, writea, cc }
+`define TEST(alu, reade, mswap, writea, cc) { dispatch, ALUinst, ReadE, Mswap, WriteAC, condition_code } = { dTEST, alu, reade, mswap, writea, cc }
 
 	TRN: `TEST(`aluSETA, no, no, no, skip_never);
 	TLN: `TEST(`aluSETA, no, yes, no, skip_never);
@@ -566,31 +566,28 @@ module decode
 	
 	IO_INSTRUCTION:
 	  if (user && !userIO)
-	    dispatch = MUUO;
+	    dispatch = dMUUO;
 	  else
 	    case (instIOOP(inst))
 	      CONO:		// I/O Cond <- 0,E
-		{ dispatch, io_conditions } = { IOwrite, yes };
+		{ dispatch, io_conditions } = { dIOwrite, yes };
 	      CONI:		// C(E) <- I/O Cond
-		{ dispatch, WriteE, condition_code, io_conditions } = { IOread, yes, skip_never, yes };
+		{ dispatch, WriteE, condition_code, io_conditions } = { dIOread, yes, skip_never, yes };
 	      CONSZ:		// E & Cond, Skip if 0
-		{ dispatch, ALUinst, condition_code, Comp0, io_conditions } = { IOread, `aluAND, skipe, yes, yes };
-	       CONSO:		// E | Cond, Skip if not 0
-		{ dispatch, ALUinst, condition_code, Comp0, io_conditions } = { IOread, `aluIOR, skipn, yes, yes };
+		{ dispatch, ALUinst, condition_code, Comp0, io_conditions } = { dIOread, `aluAND, skipe, yes, yes };
+	      CONSO:		// E | Cond, Skip if not 0
+		{ dispatch, ALUinst, condition_code, Comp0, io_conditions } = { dIOread, `aluIOR, skipn, yes, yes };
 	      DATAO:		// I/O Data <- C(E)
-		{ dispatch, ALUinst, ReadE } = { IOwrite, `aluSETM, yes };
+		{ dispatch, ALUinst, ReadE } = { dIOwrite, `aluSETM, yes };
 	      DATAI:		// C(E) <- I/O Data
-		{ dispatch, WriteE } = { IOread, yes };
+		{ dispatch, WriteE } = { dIOread, yes };
 	      BLKI, BLKO:	// Block In/Out -- gotta get to these one day !!!
-		dispatch = Unassigned;
+		dispatch = dUnassigned;
 	    endcase // case (IOOP(inst))
 
 	default:
-	  dispatch = Unassigned;
+	  dispatch = dUnassigned;
       endcase
    end // always @ (*)
 
 endmodule // decode
-
-
-  

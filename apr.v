@@ -2,17 +2,11 @@
 //
 // Arithmetic Processing Unit for kv10 processor
 //
-// 2013-01-31 dab	initial version
-// 2015-02-27 dab	rewrite to match better understanding of how to write state machines
 
+`timescale 1 ns / 1 ns
 
 `include "constants.vh"
 `include "alu.vh"
-
-// I kept typing this over and over so ...
-// the AC for the current instruction
-`define AC accumulators[ac]
-`define AC_next accumulators[ac_next]
 
 module apr
   (
@@ -21,15 +15,15 @@ module apr
    // interface to memory and I/O
    output reg [`ADDR] mem_addr,
    input [`WORD]      mem_read_data,
-   output reg [`WORD] mem_write_data,
+   output [`WORD]     mem_write_data,
    output reg 	      mem_user, // selects user or exec memory
-   output reg 	      mem_write = 0, // only one of mem_write, mem_read, io_write, or io_read
-   output reg 	      mem_read = 0,
-   output reg 	      io_write = 0,
-   output reg 	      io_read = 0,
+   output reg 	      mem_mem_write, // only one of mem_write, mem_read, io_write, or io_read
+   output reg 	      mem_mem_read,
+   output reg 	      io_write,
+   output reg 	      io_read,
    input 	      mem_write_ack,
    input 	      mem_read_ack,
-   input 	      mem_nxm,	// !!! don't do ;anything with this yet
+   input 	      mem_nxm, // !!! don't do anything with this yet
    input 	      mem_page_fail,
    input [1:7] 	      mem_pi_req, // PI requests from I/O devices
 
@@ -37,6 +31,1538 @@ module apr
    output reg [`ADDR] display_addr, 
    output reg 	      running
     );
+
+`include "functions.vh"
+`include "io.vh"
+`include "opcodes.vh"
+`include "decode.vh"
+
+   //
+   // Data Paths
+   //
+
+   // Fast Accumulators
+   reg [`WORD] 	      accumulators [0:'o17];
+   reg 		      AC_write,
+		      AC_mem_write;
+`ifdef SIM
+   initial begin
+      accumulators[0] = 'o070707_707070;
+      accumulators[1] = 'o070707_707070;
+      accumulators[2] = 'o070707_707070;
+      accumulators[3] = 'o070707_707070;
+      accumulators[4] = 'o070707_707070;
+      accumulators[5] = 'o070707_707070;
+      accumulators[6] = 'o070707_707070;
+      accumulators[7] = 'o070707_707070;
+      accumulators[8] = 'o070707_707070;
+      accumulators[9] = 'o070707_707070;
+      accumulators[10] = 'o070707_707070;
+      accumulators[11] = 'o070707_707070;
+      accumulators[12] = 'o070707_707070;
+      accumulators[13] = 'o070707_707070;
+      accumulators[14] = 'o070707_707070;
+      accumulators[15] = 'o070707_707070;
+   end
+`endif   
+
+   // dual-port, synchronous write
+   always @(posedge clk) begin
+      if (AC_write)
+	accumulators[ACsel] <= write_data;
+      if (AC_mem_write)
+	accumulators[mem_addr[32:35]] <= write_data;
+   end
+   // dual-port, asynchronous read
+   wire [`WORD]       AC = accumulators[ACsel];
+   wire [`WORD]       AC_mem = accumulators[mem_addr[32:35]];
+
+   // An assortment of other registers in the micro-machine
+   reg [`WORD] 	      Alow;	// scratchpad for double-word operations
+   reg [`WORD] 	      Areg;	// scratchpad for the A leg of the ALU
+   reg [`WORD] 	      Mreg;	// scratchpad for the M leg of the ALU
+   reg [`ADDR] 	      PC;	// Program Counter
+   reg [0:12] 	      OpA;	// Op and A fields of the instruction
+   reg [13:17] 	      IX;	// I and X fields of the instruction
+   reg [18:35] 	      Y;	// Y field of the instruction
+   wire [`WORD]       inst = { OpA, IX, Y }; // put the whole instruction together
+   wire 	      Indirect = instI(inst);
+   wire [0:3] 	      X = instX(inst);
+   wire 	      Index = (X != 0);
+   wire [`ADDR]       E = Y;	       // Y is also used for E
+   wire [0:3] 	      A = instA(inst); // Pull out the A field
+   reg [0:5] 	      BP_P;	       // Position field of byte pointer
+   reg [0:5] 	      BP_S;	       // Size field of byte pointer
+   // write these registers under control of the micro-machine
+   reg 		      Alow_load, Areg_load, Mreg_load,
+		      OpA_load, IX_load, Y_load, BP_load,
+		      PC_load, PC_next, PC_skip;
+   always @(posedge clk) begin
+      if (Alow_load) Alow <= ALUresultlow;
+      
+      if (Areg_load) 
+	Areg <= write_data;
+      else if (mul_start)
+	Areg <= 0;		// a hack to save a state
+      
+      if (Mreg_load) Mreg <= write_data;
+      if (PC_load)
+	PC <= RIGHT(write_data);
+      else if (PC_next)
+	PC <= PC + 1;
+      else if (PC_skip)
+	PC <= PC + 2;
+      if (OpA_load) OpA <= { instOP(write_data), instA(write_data) };
+      if (IX_load)
+	IX <= { instI(write_data), instX(write_data) };
+      if (Y_load) Y <= instY(write_data);
+      if (BP_load) { BP_P, BP_S } = { P(write_data), S(write_data) };
+   end
+
+   // A-leg mux to the ALU
+   reg [0:3] 	      Asel;	// set correct size !!!
+   reg [`WORD] 	      Amux;
+   localparam
+     Asel_one = 0,
+     Asel_minusone = 1,
+     Asel_Mreg = 2,
+     Asel_Areg = 3,
+     Asel_PC = 4,
+     Asel_E = 5,
+     Asel_AC = 6,
+     Asel_BPmask = 7;
+   always @(*)
+     case (Asel)
+       Asel_one: Amux = `ONE;
+       Asel_minusone: Amux = `MINUSONE;
+       Asel_Mreg: Amux = Mreg;
+       Asel_Areg: Amux = Areg;
+       Asel_PC: Amux = { PSW, PC };
+       Asel_E: Amux = { `HALFSIZE'd0, E };
+       Asel_AC: Amux = AC;
+       Asel_BPmask: Amux = bp_mask(BP_S);
+       default: Amux = AC;
+     endcase // case (Asel)
+
+   // M-leg mux to the ALU
+   reg [0:3] 	      Msel;	// set correct size !!!
+   reg [`WORD] 	      Mmux;
+   wire [`HWORD]      extP = { 12'b0, BP_P };
+   wire [`HWORD]      extPneg = -extP;
+   localparam
+     Msel_AC = 0,
+     Msel_E = 1,
+     Msel_Mreg = 2,
+     Msel_BP_P = 3,
+     Msel_BP_Pneg = 4;
+   always @(*)
+     case (Msel)
+       Msel_AC: Mmux = AC;
+       Msel_E: Mmux = { `HALFZERO, E };
+       Msel_Mreg: Mmux = Mreg;
+       Msel_BP_P: Mmux = { `HALFZERO, 12'b0, BP_P };
+       Msel_BP_Pneg: Mmux = { `HALFZERO, extPneg };
+       default: Mmux = AC;
+     endcase // case (Msel)
+
+   // Optionally swap the halfwords on any of the legs to or from the ALU
+   wire 	      Aswap, Mswap, Cswap; // driven from instruction decode
+   reg 		      Mswap_ue;
+   wire [`WORD]       Aalu = Aswap ? { RIGHT(Amux), LEFT(Amux) } : Amux;
+   wire [`WORD]       Malu = Mswap || Mswap_ue ? { RIGHT(Mmux), LEFT(Mmux) } : Mmux;
+   wire [`WORD]       Calu = Cswap ? { RIGHT(ALUresult), LEFT(ALUresult) } : ALUresult;
+
+   // Select either A or A+1 for double word operations
+   reg 		      ACnext;
+   wire [0:3] 	      ACsel = ACnext ? A + 1 : A;
+   
+   // Memory Address mux
+   reg [0:2] 	      ADDRsel;	// set correct size !!!
+   localparam
+     ADDRsel_X = 0,
+     ADDRsel_E = 1,
+     ADDRsel_M = 2,
+     ADDRsel_PC = 3,
+     ADDRsel_PIVector = 4,
+     ADDRsel_IO = 5;
+   always @(*)
+     case (ADDRsel)
+       ADDRsel_X: mem_addr = { 14'b0, X };
+       ADDRsel_E: mem_addr = E;
+       ADDRsel_M: mem_addr = RIGHT(Malu);
+       ADDRsel_PC: mem_addr = PC;
+//       ADDRsel_PIVector: mem_addr = PIVector;
+       ADDRsel_IO: mem_addr = io_dev;
+     endcase // case (ADDRsel)
+   
+   // some extra state to help with implementing multiply and divide
+   wire 	      mul_shift_set = NEGATIVE(Malu) & Alow[35];
+   reg 		      mul_shift_bit;
+   wire 	      mul_shift_ctl = mul_shift_bit | mul_shift_set;
+   reg [0:5] 	      mul_count;
+   reg 		      mul_done; // when the count overflows to 0
+   reg 		      mul_start, mul_step, div_start;
+   reg 		      div_first; // set on our first trip through
+   wire 	      div_overflow = div_first & ALUoverflow; // for catching divide overflow
+   always @(posedge clk)
+     if (reset || mul_start || div_start) begin
+	mul_shift_bit <= 0;
+	mul_count <= div_start ? -36 : -35;
+	mul_done <= 0;
+	div_first <= 1;
+     end else if (mul_step) begin
+	if (mul_shift_set)
+	  mul_shift_bit <= 1;
+	{mul_done, mul_count } <= mul_count + 1;
+	div_first <= 0;
+     end
+
+   // Wire in the ALU
+   reg [`aluCMD]      ALUcommand;
+   wire [`WORD]       ALUresultlow;
+   wire [`WORD]       ALUresult;
+   wire 	      ALUcarry0;
+   wire 	      ALUcarry1;
+   wire 	      ALUoverflow;
+   wire 	      ALUzero;
+   alu alu(ALUcommand, Alow, Aalu, Malu, mul_shift_ctl, NEGATIVE(AC), ALUresultlow, ALUresult, 
+     ALUcarry0, ALUcarry1, ALUoverflow, ALUzero);
+
+   // C-mux on the output of the ALU
+   reg [`WORD] 	      write_data;
+   reg [0:2] 	      Csel;
+   localparam
+     Csel_read_data = 0,
+     Csel_io_data = 1,
+     Csel_ALUresult = 2,
+     Csel_start_addr = 3;
+   always @(*)
+     case (Csel)
+       Csel_read_data: write_data = read_data;
+       Csel_io_data: write_data = read_data; // not yet implemented !!!
+       Csel_ALUresult: write_data = Calu;
+       Csel_start_addr: write_data = `WORDSIZE'o01000;
+       default: write_data = X;
+     endcase // case (Csel)
+   assign mem_write_data = write_data; // send it to the memory too
+
+   // Mux for Memory, ACs, and internal IO devices
+   reg [`WORD] 	      read_data;
+   reg 		      read_ack, write_ack;
+   reg 		      read, write;
+   reg [`WORD] 	      apr_io_read = 0;
+   always @(*)
+     if (ADDRsel == ADDRsel_IO) begin
+	read_data = apr_io_read;
+	read_ack = io_read;
+	AC_mem_write = 0;
+	mem_mem_write = 0;
+	mem_mem_read = 0;
+	write_ack = io_write;
+     end else if (isAC(mem_addr)) begin
+	read_data = AC_mem;
+	read_ack = mem_read;
+	AC_mem_write = mem_write;
+	mem_mem_read = 0;
+	mem_mem_write = 0;
+	write_ack = mem_write;
+     end else begin
+	read_data = mem_read_data;
+	read_ack = mem_read_ack & mem_read;
+	AC_mem_write = 0;
+	mem_mem_write = mem_write;
+	mem_mem_read = mem_read;
+	write_ack = mem_write_ack & mem_write;
+     end
+
+   // Compute a skip or jump condition looking at the ALU output.  This signal only makes
+   // sense when the ALU is performing a subtraction.
+   wire [0:2] condition_code;	// driven by the instruction decode ROM
+   reg 	     jump_condition;
+   always @(*)
+     case (condition_code) // synopsys full_case parallel_case
+       skip_never: jump_condition = 0;
+       skipl: jump_condition = !ALUzero & (ALUoverflow ^ NEGATIVE(ALUresult));
+       skipe: jump_condition = ALUzero;
+       skiple: jump_condition = ALUzero | (ALUoverflow ^ NEGATIVE(ALUresult));
+       skipa: jump_condition = 1;
+       skipge: jump_condition = ALUzero | !(ALUoverflow ^ NEGATIVE(ALUresult));
+       skipn: jump_condition = !ALUzero;
+       skipg: jump_condition = !ALUzero & !(ALUoverflow ^ NEGATIVE(ALUresult));
+     endcase
+   // Compute a skip or jump condition by comparing the ALU output to 0
+   reg 	     jump_condition_0;
+   always @(*)
+     case (condition_code) // synopsys full_case parallel_case
+       skip_never: jump_condition_0 = 0;
+       skipl: jump_condition_0 = NEGATIVE(ALUresult);
+       skipe: jump_condition_0 =  ALUzero;
+       skiple: jump_condition_0 = ALUzero | NEGATIVE(ALUresult);
+       skipa: jump_condition_0 = 1;
+       skipge: jump_condition_0 = ALUzero | !NEGATIVE(ALUresult);
+       skipn: jump_condition_0 = !ALUzero;
+       skipg: jump_condition_0 = !ALUzero &!NEGATIVE(ALUresult);
+     endcase
+   
+   //
+   // Processor Status Word
+   //
+   reg overflow, carry0, carry1, floating_overflow;
+   reg first_part_done, user, userIO, floating_underflow, no_divide;
+   reg clear_carry0, clear_carry1, clear_overflow, set_overflow, clear_floating_overflow;
+   reg clear_first_part_done, set_first_part_done, set_no_divide;
+   reg Flags_load, PSW_reset, PSW_load;
+   wire [`HWORD] PSW = { overflow, carry0, carry1, floating_overflow,
+			 first_part_done, user, userIO, 4'b0,
+			 floating_underflow, no_divide, 5'b0 };
+   always @(posedge clk) begin
+      if (Flags_load) begin
+	 if (ALUoverflow) overflow <= 1;
+	 if (ALUcarry0) carry0 <= 1;
+	 if (ALUcarry1) carry1 <= 1;
+      end
+
+      if (clear_overflow) overflow <= 0;
+      if (set_overflow) overflow <= 1;
+      if (clear_carry0) carry0 <= 0;
+      if (clear_carry1) carry1 <= 0;
+      if (clear_floating_overflow) floating_overflow <= 0;
+      if (clear_first_part_done) first_part_done <= 0;
+      if (set_first_part_done) first_part_done <= 1;
+      if (set_no_divide) no_divide <= 1;
+      
+      if (PSW_load) begin	// load PSW from the left half of Mreg
+	 overflow <= Mreg[0];
+	 carry0 <= Mreg[1];
+	 carry1 <= Mreg[2];
+	 floating_overflow <= Mreg[3];
+	 first_part_done <= Mreg[4];
+	 user <= Mreg[5];
+	 userIO <= Mreg[6];
+	 floating_underflow <= Mreg[11];
+	 no_divide <= Mreg[12];
+      end
+
+      if (PSW_reset) begin
+	 overflow <= 0;
+	 carry0 <= 0;
+	 carry1 <= 0;
+	 floating_overflow <= 0;
+	 first_part_done <= 0;
+	 user <= 0;
+	 userIO <= 0;
+	 floating_underflow <= 0;
+	 no_divide <= 0;
+      end
+   end
+
+   // need to save the ALUoverflow flag for JFFO
+   reg JFFO_overflow, overflow_load;
+   always @(posedge clk)
+     if (overflow_load)
+       JFFO_overflow = ALUoverflow;
+   
+
+   //
+   // Instruction Decode ROM
+   //
+
+   wire [0:4] dispatch;		// main instruction branch in the state machine
+   wire [`aluCMD] ALUinst;	// the ALU operation needed by this instruction
+   wire 	  ReadE,	// the instruction reads the value from E
+ 		  ReadAC,	// the instruction puts AC on the Mmux
+ 		  ReadOne,	// select 1 on the Amux
+ 		  ReadMinusOne, // select -1 on the Amux
+ 		  ReadMonA,	// select Mreg on the Amux
+ 		  SetFlags,	// the instruction sets the processor flags
+ 		  WriteE,	// the instruction writes to E
+ 		  WriteAC,	// the instruction writes to AC
+ 		  WriteSelf,	// the instruction writes to AC if AC != 0
+ 		  Comp0,	// use jump_condition_0 instead of jump_condition
+ 		  jump;		// jump instead of skip (if the condition_code hits)
+   wire [`ADDR] io_dev;		// the I/O device
+   decode decode(.inst(inst),
+		 .user(user),
+		 .userIO(userIO),
+		 .dispatch(dispatch),
+		 .ALUinst(ALUinst),
+ 		 .ReadE(ReadE),
+ 		 .ReadAC(ReadAC),
+ 		 .ReadOne(ReadOne),
+ 		 .ReadMinusOne(ReadMinusOne),
+ 		 .ReadMonA(ReadMonA),
+		 .Aswap(Aswap),
+		 .Mswap(Mswap),
+		 .Cswap(Cswap),
+ 		 .SetFlags(SetFlags),
+ 		 .WriteE(WriteE),
+ 		 .WriteAC(WriteAC),
+ 		 .WriteSelf(WriteSelf),
+		 .condition_code(condition_code),
+ 		 .Comp0(Comp0),
+ 		 .jump(jump),
+ 		 .io_dev(io_dev));
+
+
+
+   //
+   // State Machine
+   //
+   
+`ifdef SIM
+`include "disasm.vh"
+`endif
+   
+`define STATE_COUNT 48		// eventually I'll know how large these have to be!!!
+`define STATE_SIZE 6
+   reg [0:`STATE_COUNT-1] state;
+   reg [0:`STATE_COUNT-1] next_state;
+`ifdef SIM
+   reg [0:`STATE_SIZE-1] state_index; // these are just for debugging
+   reg [0:`STATE_SIZE-1] next_state_index;
+`endif
+   
+   task set_state;
+      input [0:`STATE_SIZE-1] s;
+      begin
+`ifdef SIM
+	 next_state_index = s;
+`endif
+	 next_state[s] = 1'b1;
+      end
+   endtask
+
+   // Keeps track of a count of instructions and clock cycles
+   reg [`WORD] instruction_count = 0;
+   reg 	       inc_inst_count;
+   reg [`WORD] cycles = 0;
+`ifdef SIM
+   reg [`ADDR] inst_addr;
+`endif
+
+   // a hack to skip Indexing once we've already done it
+   reg 	       X_hidden = 0;
+   reg 	       X_hide;
+   always @(posedge clk)
+     if (reset || IX_load)
+       X_hidden <= 0;
+     else if (X_hide)
+       X_hidden <= 1;
+
+   // states in the processor state machine
+   localparam 
+     st_init = 0,
+     st_instruction_fetch = 1,
+     st_instruction_dispatch = 2,
+     st_read_e = 3,
+     st_index = 4,
+     st_exch = 5,
+     st_jsr = 6,
+     st_jsp = 7,
+     st_jsa = 8,
+     st_inc_e = 9,
+     st_jump = 10,
+     st_push = 11,
+     st_push2 = 12,
+     st_pop = 13,
+     st_pop2 = 14,
+     st_pushj = 15,
+     st_popj = 16,
+     st_jffo = 17,
+     st_write_double = 18,
+     st_write_low = 19,
+     st_mul = 20,
+     st_div1 = 21,
+     st_div2 = 22,
+     st_div3 = 23,
+     st_divhigh = 24,
+     st_divlow = 25,
+
+     st_bp_read = 26,
+     st_bp_index = 27,
+     st_bp_exec = 28,
+     st_ldb = 29,
+     st_dpb = 30,
+     st_dpb_finish = 31,
+     st_blt_write = 32,
+     st_blt_inc = 33,
+     
+     st_ioread = 45,
+     
+     st_unassigned = 46,
+     st_halted = 47;
+
+   reg mem_read, mem_write;
+
+   // synchronous part of state machine
+   always @(posedge clk) begin
+      state <= next_state;
+
+`ifdef SIM
+      cycles <= cycles+1;
+
+      // When the Op is loaded, remember the instruction address for the disassembler
+      if (OpA_load)
+	inst_addr <= mem_addr;
+`endif
+      if (reset) begin
+	 instruction_count <= 0;
+	 cycles <= 0;
+	 carry0 <= 0;
+	 carry1 <= 0;
+	 overflow <= 0;
+	 floating_overflow <= 0;
+      end else if (inc_inst_count) begin
+	 instruction_count <= instruction_count + 1;
+`ifdef SIM
+	 // this is a horrible hack but it's really handy for running a bunch of
+	 // tests and DaveC's tests all loop back to 001000 !!!
+	 if ((PC == `ADDRSIZE'o1000) && (instruction_count != 0)) begin
+	    $display("Cycles: %0d  Instructions: %0d   Cycles/inst: %f",
+		     cycles, instruction_count, $itor(cycles)/$itor(instruction_count));
+	    $finish_and_return(0);
+	 end
+
+	 // disassembler
+	 $write("%6o: %6o,%6o %s", inst_addr, inst[0:17], inst[18:35], disasm(inst));
+	 if (instX(inst) || instI(inst))
+	   $write(" @%6o", E);
+	 if (ReadE)
+	   $write(" [%6o,%6o]", Mreg[0:17], Mreg[18:35]);
+	 if (WriteAC || (WriteSelf && (A != 0)) || WriteE)
+	   $write(" %6o,%6o -->", write_data[0:17], write_data[18:35]);
+	 if (WriteAC || (WriteSelf && (A != 0)))
+	   $write(" AC%o", A);
+	 if (WriteE)
+	   $write(" [%6o]", E);
+	 $display("");		// newline
+`endif
+      end
+
+
+`ifdef SIM
+      state_index <= next_state_index;
+      
+      case (1'b1)
+	state[st_unassigned]:
+	  $display("Unassigned!!!");
+	state[st_halted]:
+	  begin
+	     $display(" HALT!!!");
+	     $display("Cycles: %0d  Instructions: %0d   Cycles/inst: %f",
+		      cycles, instruction_count, $itor(cycles)/$itor(instruction_count));
+	     $display("carry0: %b  carry1: %b  overflow: %b  floating overflow: %b",
+		      carry0, carry1, overflow, floating_overflow);
+	     print_ac();
+	     $finish_and_return(1);
+	  end
+      endcase
+`endif
+   end
+
+   // async part of the state machine
+   always @(*) begin
+      next_state = 0;
+      inc_inst_count = 0;
+      mem_read = 0;
+      mem_write = 0;
+      io_read = 0;
+      io_write = 0;
+
+      AC_write = 0;
+      Alow_load = 0;
+      Areg_load = 0;
+      Mreg_load = 0;
+      PC_load = 0;
+      PC_next = 0;
+      PC_skip = 0;
+      OpA_load = 0;
+      IX_load = 0;
+      X_hide = 0;
+      Y_load = 0;
+      BP_load = 0;
+      ACnext = 0;
+
+      PSW_load = 0;
+      PSW_reset = 0;
+      Flags_load = 0;
+      overflow_load = 0;
+      clear_overflow = 0;
+      set_overflow = 0;
+      clear_carry0 = 0;
+      clear_carry1 = 0;
+      clear_floating_overflow = 0;
+      clear_first_part_done = 0;
+      set_first_part_done = 0;
+      set_no_divide = 0;
+      Mswap_ue = 0;
+      ALUcommand = 'oX;
+      Asel = 'oX;
+      Msel = 'oX;
+      Csel = 'oX;
+
+      mul_start = 0;
+      mul_step = 0;
+      div_start = 0;
+
+      if (reset)
+	set_state(st_init);
+      else
+	case (1'b1)
+	  state[st_init]:
+	    begin
+	       // Perhaps a more interesting way to implement this is to stuff a 'JRST 1000'
+	       // into the instruction register !!!
+	       Csel = Csel_start_addr;
+	       PC_load = 1;
+	       PSW_reset = 1;
+	       set_state(st_instruction_fetch);
+	    end
+
+	  state[st_instruction_fetch]:
+	     begin
+		ADDRsel = ADDRsel_PC;
+		Csel = Csel_read_data;
+		mem_read = 1;
+		if (read_ack) begin
+		   OpA_load = 1;
+		   IX_load = 1;
+		   Y_load = 1;
+		   set_state(st_instruction_dispatch);
+		end else
+		  set_state(st_instruction_fetch);
+	     end // case: state[instruction_fetch]
+
+	  state[st_instruction_dispatch], state[st_read_e]:
+	    begin
+	       if (Index && !X_hidden) begin
+		  // don't have to wait for read_ack since we know it's an accumulator
+		  ADDRsel = ADDRsel_X;
+		  Csel = Csel_read_data;
+		  Mreg_load = 1;
+		  set_state(st_index);
+	       end else if (Indirect) begin
+		  ADDRsel = ADDRsel_E;
+		  Csel = Csel_read_data;
+		  mem_read = 1;
+		  if (read_ack) begin
+		     IX_load = 1;
+		     Y_load = 1;
+		     Mreg_load = 1; // load Mreg too so JRST 02 works
+		  end
+		  set_state(st_instruction_dispatch);
+	       end else
+		 // a bit of magic here, if we're in state instruction_dispatch then we may go
+		 // on to read E, but if we're in state read_e then we've already read E so
+		 // don't read it again.
+		 if (ReadE && state[st_instruction_dispatch]) begin
+		    ADDRsel = ADDRsel_E;
+		    Csel = Csel_read_data;
+		    mem_read = 1;
+		    if (read_ack) begin
+		       Mreg_load = 1;
+		       set_state(st_read_e);
+		    end else
+		      set_state(st_instruction_dispatch);
+		 end else begin
+		    inc_inst_count = 1;
+		    case (dispatch)
+		      // Most simple instructions come here.  Set up the muxes and the ALU
+		      // according to the instruction decode and write the ALU's output to AC or
+		      // memory
+		      dCommon:
+			begin
+			   case (1'b1)
+			     ReadOne: Asel = Asel_one;
+			     ReadMinusOne: Asel = Asel_minusone;
+			     ReadMonA: Asel = Asel_Mreg;
+			     default: Asel = Asel_AC;
+			   endcase
+			   case (1'b1)
+			     // ReadAC overrides ReadE
+			     ReadAC: Msel = Msel_AC;
+			     ReadE: Msel = Msel_Mreg;
+			     default: Msel = Msel_E;
+			   endcase
+			   ALUcommand = ALUinst;
+			   Csel = Csel_ALUresult;
+			   if (WriteE) begin
+			      ADDRsel = ADDRsel_E;
+			      mem_write = 1;
+			   end
+			   
+			   if (WriteE && !write_ack) begin
+			      // a little more magic, whether we started in state
+			      // instruction_dispatch or read_e, looping to wait for write_ack
+			      // using read_e means we won't try to read E again.
+			      set_state(st_read_e);
+			      // suppress this except for the last time through
+			      inc_inst_count = 0;
+			   end else begin
+			      // after the write to memory has completed successfully, if
+			      // we're also writing to AC or setting the flags do it now.
+			      Flags_load = SetFlags;
+			      if (WriteAC || (WriteSelf && (A != 0)))
+				AC_write = 1;
+
+			      // some of the jump and skip instructions end up here.  since
+			      // skip_condition is set to skip_never by default, any regular
+			      // instructions that end up here don't jump or skip.
+			      if (Comp0 ? jump_condition_0 : jump_condition)
+				if (jump)
+				  // Since the ALU is set up for the instruction, can't feed E
+				  // through to PC for the jump in this state.
+				  set_state(st_jump);
+				else begin
+				   PC_skip = 1;
+				   set_state(st_instruction_fetch);
+				end
+			      else begin
+				 PC_next = 1;
+				 set_state(st_instruction_fetch);
+			      end
+			   end
+			end // case: Common
+
+		      // The Logical Test instructions
+		      dTEST:
+			begin
+			   Asel = Asel_AC;
+			   Msel = ReadE ? Msel_Mreg : Msel_E;
+			   ALUcommand = ALUinst;
+			   Csel = Csel_ALUresult;			   
+			   AC_write = WriteAC;
+			   case (condition_code)
+			     skip_never:
+			       PC_next = 1;
+			     skipe:
+			       if ((Aalu & Malu) == 0)
+				 PC_skip = 1;
+			       else
+				 PC_next = 1;
+			     skipa:
+			       PC_skip = 1;
+			     skipn:
+			       if ((Aalu & Malu) != 0)
+				 PC_skip = 1;
+			       else
+				 PC_next = 1;
+			   endcase // case (condition_code)
+			   set_state(st_instruction_fetch);
+			end
+
+		      dEXCH:
+			begin
+			   Asel = Asel_AC;
+			   Msel = Msel_Mreg;
+			   ALUcommand = ALUinst;
+			   Csel = Csel_ALUresult;
+			   ADDRsel = ADDRsel_E;
+			   mem_write = 1;
+			   if (write_ack)
+			     set_state(st_exch);
+			   else begin
+			      inc_inst_count = 0;
+			      set_state(st_read_e);
+			   end
+			end
+
+		      dJRST:
+			// A whole lot missing here still !!!
+			begin
+			   if (inst[10]) begin // halt
+			      PC_next = 1;
+			      set_state(st_halted);
+			   end else begin
+			      if (inst[11]) // restore flags
+				PSW_load = 1;
+
+			      Msel = Msel_E;
+			      ALUcommand = `aluSETM;
+			      Csel = Csel_ALUresult;
+			      PC_load = 1;
+			      set_state(st_instruction_fetch);
+			   end // else: !if(inst[10])
+			end
+		      
+		      dJFCL:
+			begin
+			   clear_overflow = overflow & inst[9];
+			   clear_carry0 = carry0 & inst[10];
+			   clear_carry1 = carry1 & inst[11];
+			   clear_floating_overflow = floating_overflow & inst[12];
+			   if (({overflow, carry0, carry1, floating_overflow} & inst[9:12]) != 0) begin
+			      Msel = Msel_E;
+			      ALUcommand = `aluSETM;
+			      Csel = Csel_ALUresult;
+			      PC_load = 1;
+			   end else
+			     PC_next = 1;
+			   set_state(st_instruction_fetch);
+			end // case: Jfcl
+
+		      dJSR:
+			begin
+			   // if executed as an interrupt insturction or MUUO, leaves user mode !!!
+			   PC_next = 1; // need to increment PC before storing it.
+			   set_state(st_jsr);
+			end
+
+		      dJSP:
+			begin
+			   // if executed as an interrupt instruction or MUUO, leaves user mode !!!
+			   PC_next = 1; // need to increment PC before storing it
+			   set_state(st_jsp);
+			end
+
+		      dJSA:
+			// if executed as an interrupt instruction or MUUO, leaves user mode !!!
+			begin
+			   // C(E) <- AC
+			   Asel = Asel_AC;
+			   ALUcommand = `aluSETA;
+			   Csel = Csel_ALUresult;
+			   ADDRsel = ADDRsel_E;
+			   mem_write = 1;
+			   if (write_ack) begin
+			      PC_next = 1; // increment PC before storing it
+			      set_state(st_jsa);
+			   end else begin
+			      inc_inst_count = 0;
+			      set_state(st_instruction_dispatch);
+			   end
+			end // case: Jsa
+
+		      dJRA:
+			 begin
+			    // AC <- C(LEFT(AC))
+			    Msel = Msel_AC;
+			    Mswap_ue = 1;
+			    Csel = Csel_read_data;
+			    ADDRsel = ADDRsel_M;
+			    mem_read = 1;
+			    if (read_ack) begin
+			       AC_write = 1;
+			       set_state(st_jump);
+			    end else begin
+			       inc_inst_count = 0;
+			       set_state(st_instruction_dispatch);
+			    end
+			 end
+
+		      dXCT:
+			begin
+			   ADDRsel = ADDRsel_E;
+			   Csel = Csel_read_data;
+			   mem_read = 1;
+			   if (read_ack) begin
+			      OpA_load = 1;
+			      IX_load = 1;
+			      Y_load = 1;
+			   end else
+			     inc_inst_count = 0;
+			   set_state(st_instruction_dispatch);
+			end
+
+		      dPUSH:
+			 begin
+			    ADDRsel = ADDRsel_E;
+			    Csel = Csel_read_data;
+			    mem_read = 1;
+			    if (read_ack) begin
+			       Mreg_load = 1;
+			       set_state(st_push);
+			    end else begin
+			       inc_inst_count = 0;
+			       set_state(st_instruction_dispatch);
+			    end
+			 end
+
+		      dPOP, dPOPJ:
+			begin
+			   // Mreg <- C(AC)
+			   Msel = Msel_AC;
+			   ADDRsel = ADDRsel_M;
+			   Csel = Csel_read_data;
+			   mem_read = 1;
+			   if (read_ack) begin
+			      Mreg_load = 1;
+			      set_state(dispatch == dPOP ? st_pop : st_pop2);
+			   end else begin
+			      inc_inst_count = 0;
+			      set_state(st_instruction_dispatch);
+			   end
+			end // case: Pop
+
+		      dPUSHJ:
+			begin
+			   // need to implement the pushdown_overflow flag !!!
+			   Asel = Asel_AC;
+			   ALUcommand = `aluAOB;
+			   Csel = Csel_ALUresult;
+			   AC_write = 1;
+			   PC_next = 1;
+			   Mreg_load = 1; // Also put AC in Mreg so RIGHT(AC) can be the address
+			   set_state(st_pushj);
+			end
+		      
+		      dSHIFTC:
+			begin
+			   // Alow <- A+1
+			   Asel = Asel_AC;
+			   ACnext = 1;
+			   ALUcommand = `aluSETAlow; // SETAlow routes A to Clow
+			   Alow_load = 1;
+			   set_state(st_write_double);
+			end
+
+		      dJFFO:
+			begin
+			   // Areg <- JFFO(AC)
+			   Asel = Asel_AC;
+			   ALUcommand = `aluJFFO;
+			   Csel = Csel_ALUresult;
+			   Areg_load = 1;
+			   overflow_load = 1; // save overflow for later
+			   set_state(st_jffo);
+			end
+
+		      dBLT:
+			begin
+			   // Mreg <- C(left(AC))
+			   Msel = Msel_AC;
+			   Mswap_ue = 1; // direct left half of AC to ADDRmux
+			   ADDRsel = ADDRsel_M;
+			   Csel = Csel_read_data;
+			   mem_read = 1;
+			   if (read_ack) begin
+			      Mreg_load = 1;
+			      set_state(st_blt_write);
+			   end else begin
+			      // as it is now, the instruction counter increments for each
+			      // iteration of BLT. !!!
+			      inc_inst_count = 0;
+			      set_state(st_instruction_dispatch);
+			   end
+			end
+
+		      dMUL, dIMUL:
+			begin	// Alow <- AC  Areg <- 0
+			   Asel = Asel_AC;
+			   ALUcommand = `aluSETAlow;
+			   Csel = Csel_ALUresult;
+			   Alow_load = 1;
+			   mul_start = 1; // side-effect clears Areg
+			   set_state(st_mul);
+			end
+
+		      dDIV:
+			begin
+			   // Alow <- A+1  (Same as ShiftC !!!)
+			   Asel = Asel_AC;
+			   ACnext = 1;
+			   ALUcommand = `aluSETAlow; // SETAlow routes A to Clow
+			   Alow_load = 1;
+			   div_start = 1;
+			   set_state(st_div1);
+			end
+
+		      dIDIV:
+			begin
+			   // Alow <- AC
+			   Asel = Asel_AC;
+			   ALUcommand = `aluDIV_MAG36;
+			   Csel = Csel_ALUresult;
+			   Alow_load = 1;
+			   Areg_load = 1;
+			   div_start = 1;
+			   set_state(st_div2);
+			end
+
+		      dLDB, dDPB, dILDB, dIDPB:
+			if (((dispatch == dILDB) || (dispatch == dIDPB))
+			    && !first_part_done) begin
+			   // if the first part is not done, then we need to write the
+			   // incremented byte pointer back to memory
+			   Msel = Msel_Mreg;
+			   ALUcommand = `aluIBP;
+			   Csel = Csel_ALUresult;
+			   ADDRsel = ADDRsel_E;
+			   mem_write = 1;
+			   if (write_ack) begin
+			      // Move the incremented byte pointer into BP_P, BP_S, I, X,
+			      // and Y and go to the BP read state
+			      BP_load = 1;
+			      IX_load = 1;
+			      Y_load = 1;
+			      set_first_part_done = 1; // mark first part is now done
+			      set_state(st_bp_read);
+			   end else begin
+			      inc_inst_count = 0;
+			      set_state(st_read_e);
+			   end
+			end else begin
+			   // Mreg has the byte pointer, move it to BP_P, BP_S, I, X, and Y
+			   Msel = Msel_Mreg;
+			   ALUcommand = `aluSETM;
+			   Csel = Csel_ALUresult;
+			   BP_load = 1;
+			   IX_load = 1;
+			   Y_load = 1;
+			   set_state(st_bp_read);
+			end // else: !if(((dispatch == Ildb) || (dispatch == Idpb))...
+
+		      dIOwrite:	// I/O Device <- 0,E or C(E)
+			begin
+			   Msel = ReadE ? Msel_Mreg : Msel_E;
+			   ALUcommand = `aluSETM;
+			   Csel = Csel_ALUresult;
+			   io_write = 1;
+			   PC_next = 1;
+			   set_state(st_instruction_fetch);
+			end
+
+		      dIOread:	// C(E) <- I/O Device
+			begin
+			   Csel = Csel_io_data;
+			   io_read = 1;
+
+			   if (WriteE) begin
+			      ADDRsel = ADDRsel_E;
+			      mem_write = 1;
+
+			      if (write_ack) begin
+				 // If WriteE, it's either DATAI or CONI so just go to the next
+				 // instruction
+				 PC_next = 1;
+				 set_state(st_instruction_fetch);
+			      end else begin
+				 set_state(st_read_e);
+				 inc_inst_count = 0;
+			      end
+			   end else begin
+			      // If not WriteE, it's either CONSO or CONSZ so save the value
+			      // to Mreg and go to the next state to compute the skip
+			      Mreg_load = 1;
+			      set_state(st_ioread);
+			   end
+			end
+
+
+		      // Unassigned codes - eventually will generate the proper trap but just
+		      // halts for now !!!
+		      dUnassigned, dMUUO:
+			set_state(st_unassigned);
+			
+		    endcase // case (dispatch)
+		 end
+	    end // case: state[e_calc]
+
+	  // Index register is in Mreg so add Y and loop
+	  state[st_index]:
+	    begin
+	       Asel = Asel_E;
+	       Msel = Msel_Mreg;
+	       ALUcommand = `aluADD;
+	       Csel = Csel_ALUresult;
+	       X_hide = 1;	// hide X so instruction_dispatch doesn't see it
+	       Y_load = 1;
+	       set_state(st_instruction_dispatch);
+	    end // case: state[index]
+
+	  // The Byte Pointer is in I, X, and Y so read the location
+	  state[st_bp_read]:
+	    begin
+	       if (Index && !X_hidden) begin
+		  // don't have to wait for read_ack since we know it's an accumulator
+		  ADDRsel = ADDRsel_X;
+		  Csel = Csel_read_data;
+		  Mreg_load = 1;
+		  set_state(st_bp_index);
+	       end else if (Indirect) begin
+		  ADDRsel = ADDRsel_E;
+		  Csel = Csel_read_data;
+		  mem_read = 1;
+		  if (read_ack) begin
+		     IX_load = 1;
+		     Y_load = 1;
+		  end
+		  set_state(st_bp_read);
+	       end else begin
+		  // Address of the word containing the byte is now in E, so read that word into
+		  // Mreg.  Need to read the word whether we're doing an LDB or DPB.
+		  ADDRsel = ADDRsel_E;
+		  Csel = Csel_read_data;
+		  mem_read = 1;
+		  if (read_ack) begin
+		     Mreg_load = 1;
+		     set_state(st_bp_exec);
+		  end else
+		    set_state(st_bp_read);
+	       end // else: !if(Indirect)
+	    end
+
+	  // Index register is in Mreg so add Y and loop.  Just like st_index except loops back
+	  // to st_bp_read.
+	  state[st_bp_index]:
+	    begin
+	       Asel = Asel_E;
+	       Msel = Msel_Mreg;
+	       ALUcommand = `aluADD;
+	       Csel = Csel_ALUresult;
+	       X_hide = 1;	// hide X so st_bp_read doesn't see it
+	       Y_load = 1;
+	       set_state(st_bp_read);
+	    end // case: state[index]
+
+	  // Execute the Byte Pointer instruction, word containing the byte is in Mreg
+	  state[st_bp_exec]:
+	    if ((dispatch == dLDB) || (dispatch == dILDB)) begin // LDB or ILDB
+	       // AC <- Mreg >> P
+	       // This steps on AC but we can't be interrupted before finishing up the
+	       // operation in the next state
+	       Asel = Asel_Mreg;
+	       Msel = Msel_BP_Pneg;
+	       ALUcommand = `aluLSH;
+	       Csel = Csel_ALUresult;
+	       AC_write = 1;
+	       set_state(st_ldb);
+	    end else begin	// DPB or IDPB
+	       // Alow <- BPmask << P
+	       Asel = Asel_BPmask;
+	       Msel = Msel_BP_P;
+	       ALUcommand = `aluLSH;
+	       Alow_load = 1;
+	       set_state(st_dpb);
+	    end
+
+	  // Finish up LDB
+	  state[st_ldb]:
+	    begin
+	       // AC <- AC & BPmask
+	       Asel = Asel_BPmask;
+	       Msel = Msel_AC;
+	       ALUcommand = `aluAND;
+	       Csel = Csel_ALUresult;
+	       AC_write = 1;
+	       if (dispatch == dILDB)
+		 clear_first_part_done = 1;
+	       PC_next = 1;
+	       set_state(st_instruction_fetch);
+	    end
+
+	  state[st_dpb]:
+	    begin
+	       // Areg <- AC << P
+	       Asel = Asel_AC;
+	       Msel = Msel_BP_P;
+	       ALUcommand = `aluLSH;
+	       Csel = Csel_ALUresult;
+	       Areg_load = 1;
+	       set_state(st_dpb_finish);
+	    end
+
+	  // Finish up DPB
+	  state[st_dpb_finish]:
+	    begin
+	       // C(E) <- Areg | Mreg masked by ALow
+	       Asel = Asel_Areg;
+	       Msel = Msel_Mreg;
+	       ALUcommand = `aluDPB;
+	       Csel = Csel_ALUresult;
+	       ADDRsel = ADDRsel_E;
+	       mem_write = 1;
+	       if (write_ack) begin
+		  if (dispatch == dIDPB)
+		    clear_first_part_done = 1;
+		  PC_next = 1;
+		  set_state(st_instruction_fetch);
+	       end else
+		 set_state(st_dpb_finish);
+	    end
+
+	  // Write out the word for BLT
+	  state[st_blt_write]:
+	    begin
+	       // C(AC) <- Mreg
+	       Asel = Asel_Mreg;
+	       Msel = Msel_AC;
+	       ALUcommand = `aluSETA;
+	       Csel = Csel_ALUresult;
+	       ADDRsel = ADDRsel_M;
+	       mem_write = 1;
+	       if (write_ack)
+		 set_state(st_blt_inc);
+	       else
+		 set_state(st_blt_write);
+	    end
+
+	  // Increment both halves of AC for BLT
+	  state[st_blt_inc]:
+	    begin
+	       Asel = Asel_AC;
+	       ALUcommand = `aluAOB;
+	       Csel = Csel_ALUresult;
+	       AC_write = 1;
+	       // BLT terminates when the word we just wrote went into location E
+	       if (RIGHT(AC) == E) begin
+		  PC_next = 1;
+		  set_state(st_instruction_fetch);
+	       end else
+		 // re-executing the instruction jumps back to the read step
+		 set_state(st_instruction_dispatch);
+	    end
+
+	  state[st_exch]:
+	    begin
+	       Asel = Asel_AC;
+	       Msel = Msel_Mreg;
+	       ALUcommand = `aluSETM;
+	       Csel = Csel_ALUresult;
+	       AC_write = 1;
+	       PC_next = 1;
+	       set_state(st_instruction_fetch);
+	    end
+
+	  state[st_jsr]:
+	    begin
+	       // C(E) <- PSW,PC
+	       Asel = Asel_PC;	// PC is already incremented
+	       ALUcommand = `aluSETA;
+	       Csel = Csel_ALUresult;
+	       ADDRsel = ADDRsel_E;
+	       mem_write = 1;
+	       clear_first_part_done = 1;
+	       if (write_ack)
+		 set_state(st_inc_e);
+	       else
+		 set_state(st_jsr);
+	    end // case: state[st_jsr]
+
+	  state[st_jsp]:
+	    begin
+	       // AC <- PSW,PC
+	       Asel = Asel_PC;	// PC is now incremented
+	       ALUcommand = `aluSETA;
+	       Csel = Csel_ALUresult;
+	       AC_write = 1;
+	       clear_first_part_done = 1;
+	       set_state(st_jump);
+	    end
+
+	  state[st_jsa]:
+	    begin
+	       // AC <- E,PC
+	       Asel = Asel_PC;	// PC is already incremented
+	       Msel = Msel_E;
+	       Mswap_ue = 1;
+	       ALUcommand = `aluHMN;
+	       Csel = Csel_ALUresult;
+	       AC_write = 1;
+	       set_state(st_inc_e);
+	    end
+
+	  // Increment E and jump to E+1
+	  state[st_inc_e]:
+	    begin
+	       Asel = Asel_one;
+	       Msel = Msel_E;
+	       ALUcommand = `aluADD;
+	       Csel = Csel_ALUresult;
+	       Y_load = 1;
+	       set_state(st_jump);
+	    end
+
+	  // finish up with a jump from instructions that need an extra cycle
+	  state[st_jump]:
+	    begin
+	       Msel = Msel_E;
+	       ALUcommand = `aluSETM;
+	       Csel = Csel_ALUresult;
+	       PC_load = 1;
+	       set_state(st_instruction_fetch);
+	    end
+
+	  state[st_push]:
+	    begin
+	       // AC <- AOB(AC)   need to implement the pushdown_overflow flag !!!
+	       Asel = Asel_AC;
+	       ALUcommand = `aluAOB;
+	       Csel = Csel_ALUresult;
+	       AC_write = 1;
+	       set_state(st_push2);
+	    end
+
+	  state[st_push2]:
+	    begin
+	       // C(RIGHT(AC)) <- C(E) (which is in Mreg)
+	       Asel = Asel_Mreg;
+	       ALUcommand = `aluSETA;
+	       Csel = Csel_ALUresult;
+	       // SETA just uses the A input to the ALU so we'll put AC on the M input and use
+	       // that to generate the write address
+	       Msel = Msel_AC;
+	       ADDRsel = ADDRsel_M;
+	       mem_write = 1;
+	       if (write_ack) begin
+		  PC_next = 1;
+		  set_state(st_instruction_fetch);
+	       end else
+		 set_state(st_push2);
+	    end // case: state[st_push2]
+
+	  state[st_pop]:
+	    begin
+	       // C(E) <- Mreg
+	       Msel = Msel_Mreg;
+	       ALUcommand = `aluSETM;
+	       Csel = Csel_ALUresult;
+	       ADDRsel = ADDRsel_E;
+	       mem_write = 1;
+	       if (write_ack)
+		 set_state(st_pop2);
+	       else
+		 set_state(st_pop);
+	    end // case: state[st_pop]
+
+	  state[st_pop2]:
+	    begin
+	       // AC <- SOB(AC)   need to implement the pushdown_overflow flag !!!!
+	       Asel = Asel_AC;
+	       ALUcommand = `aluSOB;
+	       Csel = Csel_ALUresult;
+	       AC_write = 1;
+	       if (dispatch == dPOP) begin
+		  PC_next = 1;
+		  set_state(st_instruction_fetch);
+	       end else // POPJ
+		 set_state(st_popj);
+	    end
+
+	  state[st_popj]:
+	    begin
+	       // PC <- Mreg (which holds C(AC) before AC was decremented)
+	       Msel = Msel_Mreg;
+	       ALUcommand = `aluSETM;
+	       Csel = Csel_ALUresult;
+	       PC_load = 1;
+	       set_state(st_instruction_fetch);
+	    end
+
+	  state[st_pushj]:
+	    begin
+	       // C(E) <- PSW,PC
+	       Asel = Asel_PC;	// PC is alredy incremented
+	       ALUcommand = `aluSETA;
+	       Csel = Csel_ALUresult;
+
+	       // The ALU is only passing A through so Mreg was loaded with AC so it can be used
+	       // for the address here
+	       Msel = Msel_Mreg;
+	       ADDRsel = ADDRsel_M;
+	       mem_write = 1;
+	       clear_first_part_done = 1;
+	       if (write_ack)
+		 set_state(st_jump);
+	       else
+		 set_state(st_pushj);
+	    end
+
+	  state[st_jffo]:
+	    begin
+	       // AC+1 <- Areg
+	       Asel = Asel_Areg;
+	       ALUcommand = `aluSETA;
+	       Csel = Csel_ALUresult;
+	       ACnext = 1;
+	       AC_write = 1;
+	       // Jump if overflow
+	       if (JFFO_overflow)
+		 set_state(st_jump);
+	       else begin
+		  PC_next = 1;
+		  set_state(st_instruction_fetch);
+	       end
+	    end
+
+	  state[st_write_double]:
+	    begin
+	       // beginning of double-word instructions (just the double-word shifts and rotates for now)
+	       // A <- ALUresult
+	       // Alow <- ALUresultlow (to hold for now, write to AC+1 on the next state
+	       Asel = Asel_AC;
+	       Msel = Msel_E;
+	       ALUcommand = ALUinst;
+	       Csel = Csel_ALUresult;
+	       AC_write = 1;
+	       Alow_load = 1;
+	       if (SetFlags)
+		 Flags_load = 1;
+	       set_state(st_write_low);
+	    end // case: state[st_write_double]
+
+	  state[st_write_low]:
+	    begin
+	       // A+1 <- Alow
+	       Msel = Msel_E;
+	       ALUcommand = `aluSETAlow; // SETAlow routes Alow to C (ALUresult)
+	       Csel = Csel_ALUresult;
+	       ACnext = 1;
+	       AC_write = 1;
+	       PC_next = 1;
+	       set_state(st_instruction_fetch);
+	    end
+
+	  state[st_mul]:
+	    if (mul_done) begin
+	       Asel = Asel_Areg;
+	       Msel = ReadE ? Msel_Mreg : Msel_E;
+	       ALUcommand = (dispatch == dIMUL) ? `aluIMUL_SUB : `aluMUL_SUB;
+	       Csel = Csel_ALUresult;
+	       if (WriteE) begin
+		  ADDRsel = ADDRsel_E;
+		  mem_write = 1;
+	       end
+
+	       if (WriteE && !write_ack)
+		 set_state(st_mul);
+	       else begin
+		  if (SetFlags)
+		    Flags_load = 1;
+
+		  if (WriteAC) begin
+		     AC_write = 1;
+		     if (dispatch == dMUL) begin
+			// like st_write_double, write AC now and save Alow for the next state
+			Alow_load = 1;
+			set_state(st_write_low);
+		     end else begin
+			PC_next = 1;
+			set_state(st_instruction_fetch);
+		     end
+		  end else begin
+		     PC_next = 1;
+		     set_state(st_instruction_fetch);
+		  end
+	       end // else: !if(WriteE && !write_ack)
+	    end else begin
+	       // the core of the multiply loop
+	       Asel = Asel_Areg;
+	       Msel = ReadE ? Msel_Mreg : Msel_E;
+	       ALUcommand = `aluMUL_ADD;
+	       Csel = Csel_ALUresult;
+	       Areg_load = 1;
+	       Alow_load = 1;
+	       mul_step = 1;
+	       set_state(st_mul);
+	    end
+
+	  state[st_div1]:
+	    begin		// Areg,Alow <- |A,Alow|
+	       Asel = Asel_AC;
+	       ALUcommand = `aluDIV_MAG72;
+	       Csel = Csel_ALUresult;
+	       Areg_load = 1;
+	       Alow_load = 1;
+	       set_state(st_div2);
+	    end
+
+	  state[st_div2]:
+	    begin		// core of the divide loop, subtract and shift
+	       Asel = Asel_Areg;
+	       Msel = ReadE ? Msel_Mreg : Msel_E;
+	       ALUcommand = `aluDIV_OP;
+	       Csel = Csel_ALUresult;
+	       Areg_load = 1;
+	       Alow_load = 1;
+	       mul_step = 1;
+	       if (div_overflow) begin
+		  set_overflow = 1;
+		  set_no_divide = 1;
+		  PC_next = 1;
+		  set_state(st_instruction_fetch);
+	       end if (mul_done) begin
+		  ALUcommand = `aluDIV_FIXR; // Unrotate R (in Areg)
+		  set_state(st_div3);
+	       end else
+		 set_state(st_div2);
+	    end
+
+	  state[st_div3]:
+	    begin
+	       Asel = Asel_Areg;
+	       Msel = ReadE ? Msel_Mreg : Msel_E;
+	       ALUcommand = `aluDIV_FIXUP;
+	       Csel = Csel_ALUresult;
+	       Areg_load = 1;
+	       Alow_load = 1;
+	       set_state(st_divhigh);
+	    end
+
+	  state[st_divhigh]:	// write quotient
+	    begin
+	       ALUcommand = `aluSETAlow;
+	       Csel = Csel_ALUresult;
+	       
+	       if (WriteE) begin
+		  ADDRsel = ADDRsel_E;
+		  mem_write = 1;
+	       end
+
+	       if (WriteE && !write_ack)
+		 set_state(st_divhigh);
+	       else begin
+		  if (WriteAC) begin // if we're not writing to AC then we could go directly to
+				     // st_instruction_fetch here
+		     AC_write = 1;
+		  end
+		  set_state(st_divlow);
+	       end
+	    end // case: state[st_divhigh]
+
+	  state[st_divlow]:	// write remainder
+	    begin
+	       if (WriteAC) begin
+		  Asel = Asel_Areg;
+		  ALUcommand = `aluSETA;
+		  Csel = Csel_ALUresult;
+		  ACnext = 1;
+		  AC_write = 1;
+	       end
+	       PC_next = 1;
+	       set_state(st_instruction_fetch);
+	    end
+
+	  state[st_ioread]:
+	    begin
+	       Msel = Msel_Mreg;
+	       ALUcommand = ALUinst;
+	       if (jump_condition_0)
+		 PC_skip = 1;
+	       else
+		 PC_next = 1;
+	       set_state(st_instruction_fetch);
+	    end
+
+	  state[st_unassigned]:
+	    set_state(st_halted);
+	  state[st_halted]:
+	    set_state(st_halted);
+
+	endcase // case (1'b1)
+   end
+      
+
+
+
+`ifdef NOTDEF
+   // *********************************************************************************
+   // *********************************************************************************
+   // *********************************************************************************
+   // *********************************************************************************
+   // *********************************************************************************
+   // *********************************************************************************
+
 
    reg [`WORD] switch_register;
 
@@ -613,8 +2139,6 @@ module apr
 `include "disasm.vh"
 `endif
 
-`include "functions.vh"
-`include "io.vh"
 
    // For SKIP, CAI, CAM instructions
    function [0:2] skip_condition;
@@ -915,400 +2439,6 @@ module apr
    end
 `endif //  `ifdef NOTDEF
    
-   //   
-   // Main instruction decode.
-   //
-
-   always @(*) begin
-      // defaults
-      decode(AC_inst, `aluSETA, read_data, 0, none, none, none);
-      conIO = 0;
-      unassigned_code = 1;
-
-      casex (OP(inst))		// synopsys full_case parallel_case
-
-	LUUO01, LUUO02, LUUO03, LUUO04, LUUO05, LUUO06, LUUO07,
-	LUUO10, LUUO11, LUUO12, LUUO13, LUUO14, LUUO15, LUUO16, LUUO17,
-	LUUO20, LUUO21, LUUO22, LUUO23, LUUO24, LUUO25, LUUO26, LUUO27,
-	LUUO30, LUUO31, LUUO32, LUUO33, LUUO34, LUUO35, LUUO36, LUUO37:
-	  begin
-	     decode(AC_inst, `aluSETA, read_data, 0, none, none, none);
-	     unassigned_code = 1;
-	  end
-	  
-	UUO00, 		  
-	CALL, INITI, MUUO42, MUUO43, MUUO44, MUUO45, MUUO46, CALLI,
-	OPEN, TTCALL, MUUO52, MUUO53, MUUO54, RENAME, IN, OUT,
-	SETSTS, STATO, STATUS, GETSTS, INBUF, OUTBUF, INPUT, OUTPUT,
-	CLOSE, RELEAS, MTAPE, UGETF, USETI, USETO, LOOKUP, ENTER:
-	  begin
-	     decode(AC_inst, `aluSETA, read_data, 0, none, none, none);
-	     unassigned_code = 1;
-	  end
-
-	UJEN, UNK101, GFAD, GFSB, JSYS, ADJSP, GFMP, GFDV,
-	DFAD, DFSB, DFMP, DFDV, DADD, DSUB, DMUL, DDIV,
-	DMOVE, DMOVN, FIX, EXTEND, DMOVEM, DMOVNM, FIXR, FLTR,
-	UFA, DFN, FSC,  // byte instructions come out of here
-	FAD, FADL, FADM, FADB, FADR, FADRL, FADRM, FADRB,
-	FSB, FSBL, FSBM, FSBB, FSBR, FSBRL, FSBRM, FSBRB,
-	FMP, FMPL, FMPM, FMPB, FMPR, FMPRL, FMPRM, FMPRB,
-	FDV, FDVL, FDVM, FDVB, FDVR, FDVRL, FDVRM, FDVRB:
-	  begin
-	     decode(AC_inst, `aluSETA, read_data, 0, none, none, none);
-	     unassigned_code = 1;
-	  end
-
-	//
-	// MOVE instructions
-	//
-
-	MOVE, MOVS, MOVN, MOVM:	    // AC <- C(E) (straight, swapped, negated, magnitude)
-	  decode(AC_inst, move_alucmd(inst), read_data, 1, none, dispatch, mode_writeFlags(inst));
-	MOVEI, MOVSI, MOVNI, MOVMI: // AC <- 0,,E (straight, swapped, negated, magnitude)
-	  decode(AC_inst, move_alucmd(inst), E_word, 0, none, dispatch, mode_writeFlags(inst));
-	// !!! really don't want ALUop2 to be AC_inst here but I'm not sure how to implement
-	// negate or magnitude off ALUop1 !!!
-	MOVEM, MOVSM, MOVNM, MOVMM: // C(E) <- AC (straight, swapped, negated, magnitude)
-	  decode(AC_inst, move_alucmd(inst), AC_inst, 0, dispatch, none, mode_writeFlags(inst));
-	MOVES, MOVSS, MOVNS, MOVMS: // C(E) and AC (if not 0) <- C(E)
-	  decode(AC_inst, move_alucmd(inst), read_data, 1, dispatch, (ac != 0) ? write_finish : none, mode_writeFlags(inst));
-	//
-	// Integer Multiply and Divide
-	//
-
-	IMULI, IMUL, IMULM, IMULB, MULI, MUL, MULM, MULB:
-	  begin
-	     // this is a simple, shift and add multiplier.  to make negative numbers work right,
-	     // we subtract the last partial product.
-	     if (ALUcount == 0)
-	       aluc_set(ALUstep, ALUstep[`DWORDSIZE-1] ? `aluSUB : `aluSETA, mem_src);
-	     else
-	       aluc_set(ALUstep, ALUstep[`DWORDSIZE-1] ? `aluADD : `aluSETA, mem_src);
-
-	     decode_flags(mode_readE(inst), none, none, none);
-	  end
-
-	IDIVI, IDIV, IDIVM, IDIVB, DIVI, DIV, DIVM, DIVB:
-	  begin
-	     if (state[div_loop])
-	       if (ALUcount == 0)
-		 // when we're done the divide loop, if the remainder is negative fix it up.  we
-		 // also only shift the quotient (low word of ALUstep) at this point.
-		 if (ALUstep[0] == 1)
-		   aluc_set({ DLEFT(ALUstep), ALUstep[`WORDSIZE+1:`DWORDSIZE-1], shift_bit}, 
-			    NEGATIVE(ALUop2) ? `aluSUB : `aluADD, mem_src);
-		 else
-		   aluc_set({ DLEFT(ALUstep), ALUstep[`WORDSIZE+1:`DWORDSIZE-1], shift_bit}, `aluSETA, mem_src);
-	       else
-		 // the core of the divide loop shifts remainder,,quotient in ALUstep one bit left
-		 // and then add or subtract the divisor in ALUop2.
-		 aluc_set({ ALUstep[1:`DWORDSIZE-1], shift_bit},
-			  NEGATIVE(ALUop2) ^ shift_bit ? `aluSUB : `aluADD, mem_src);
-	     else
-	       // These start the divide by setting up the initial values through the ALU
-	       //
-	       // IDIVx initializes op1 to the magnitude of A shifted left one position
-	       //
-	       // DIVx initializes op1 to the magnitude of the double word in A and A+1 shifted
-	       // left one position (also gets rid of the duplicated sign bit in A+1)
-	       case (OP(inst))	// synopsys full_case parallel_case
-		 IDIVI:
-		   aluc_set({`ZERO_SHORT, MAGNITUDE(AC_inst), 1'b0},
-			    NEGATIVE(E_word) ? `aluADD : `aluSUB, E_word);
-		 IDIV, IDIVM, IDIVB:
-		   aluc_set({`ZERO_SHORT, MAGNITUDE(AC_inst), 1'b0}, 
-			    NEGATIVE(read_data) ? `aluADD : `aluSUB, read_data);
-		 DIVI:
-		   aluc_set(DMAGNITUDE({AC_inst, `AC_next[1:`WORDSIZE-1], 1'b0}),
-			    NEGATIVE(E_word) ? `aluADD : `aluSUB, E_word);
-		 DIV, DIVM, DIVB:
-		   aluc_set(DMAGNITUDE({AC_inst, `AC_next[1:`WORDSIZE-1], 1'b0}),
-			    NEGATIVE(read_data) ? `aluADD : `aluSUB, read_data);
-	       endcase // case (OP(inst))
-
-	     decode_flags(mode_readE(inst), none, none, none);
-	  end     
-
-	//
-	// Shifts and Rotates
-	//
-
-	ASH: decodec(ALUstep, `aluASH, E_word, 0, none, none, none);
-	ROT: decodec(ALUstep, `aluROT, E_word, 0, none, none, none);
-	LSH: decodec(ALUstep, `aluLSH, E_word, 0, none, none, none);
-	JFFO: decodec(ALUstep, `aluLSHC, `ZERO, 0, none, none, none); // left shift
-	ASHC: decodec(ALUstep, `aluASHC, E_word, 0, none, none, none);
-	ROTC: decodec(ALUstep, `aluROTC, E_word, 0, none, none, none);
-	LSHC: decodec(ALUstep, `aluLSHC, E_word, 0, none, none, none);
-`ifdef CIRC
-	CIRC: decodec(ALUstep, `aluCIRC, E_word, 0, none, none, none); // I need to write a diagnostic for CIRC !!!
-`endif
-
-	EXCH:			// Exchange, AC <-> C(E)
-	  // this is kind of a hack, changing the input to the ALU to write read_data to the AC
-	  // after the memory write finishes
-	  decode(state[write_finish] ? read_data : AC_inst, `aluSETA, read_data, 1, dispatch, write_finish, none);
-
-	BLT:			// Block Transfer (the ALU is incrementing the pointers)
-	  decode(AC_inst, `aluAOB, `ZERO, 0, none, blt_read, none);
-	AOBJP, AOBJN:		// Add One to Both halves of AC, Jump if Positive/Negative
-	  decode(AC_inst, `aluAOB, `ZERO, 0, none, dispatch, none);
-	JRST:			// Jump and Restory Flags
-	  decode(AC_inst, `aluSETA, `ZERO, 0, none, none, none);
-	JFCL:			// Jump on Flag and Clear
-	  decode(AC_inst, `aluSETA, `ZERO, 0, none, none, none);
-	XCT: // Execute instruction at E (I don't read E here as it would read in the wrong mode)
-	  decode(AC_inst, `aluSETA, `ZERO, 0, none, none, none);
-	
-`ifdef NOTDEF
-	MAP: ;
-`endif
-
-	PUSHJ:			// AC <- aob(AC) then C(AC) <- { Flags, PC_next}  Push down and Jump
-	  decode(AC_inst, `aluAOB, `ZERO, 1, none, dispatch, none);
-	PUSH:			// AC <- aob(AC) then C(AC) <- C(E)
-	  decode(AC_inst, `aluAOB, `ZERO, 1, none, dispatch, none);
-	POP:			// C(E) <- C(AC) then AC <- sob(AC)
-	  decode(AC_inst, `aluSOB, `ZERO, 0, none, pop_finish, none);
-	POPJ:			// Pop up and Jump
-	  decode(AC_inst, `aluSOB, `ZERO, 0, none, popj_finish, none);
-
-	JSR: 			// Jump to Subroutine
-	  decode({ `FLAGS, PC_next }, `aluSETA, `ZERO, 0, dispatch, none, none);
-	JSP:			// Jump and Save PC
-	  decode({ `FLAGS, PC_next }, `aluSETA, `ZERO, 0, none, dispatch, none);
-	JSA:			// Jump and Save AC
-	  decode(AC_inst, `aluSETA, `ZERO, 0, dispatch, none, none);
-	JRA:			// Jump and Restore AC
-	  decode(`ZERO, `aluSETM, read_data, 0, none, jra_finish, none);
-
-	ADD,			// AC <- AC + C(E)
-	  ADDI,			// AC <- AC + 0,,E
-	  ADDM,			// C(E) <- AC + C(E)
-	  ADDB:			// AC and C(E) <- AC + C(E)
-	    decode(AC_inst, `aluADD, mem_src, 
-		   mode_readE(inst), mode_writeE(inst), mode_writeAC(inst), mode_writeFlags(inst));
-	SUB,			// AC <- AC - C(E)
-	  SUBI,			// AC <- AC - 0,,E
-	  SUBM,			// C(E) <- AC - C(E)
-	  SUBB:			// AC and C(E) <- AC - C(E)
-	    decode(AC_inst, `aluSUB, mem_src, 
-		   mode_readE(inst), mode_writeE(inst), mode_writeAC(inst), mode_writeFlags(inst));
-
-	// Compare Accumulator to Immediate/Memory
-	CAI,CAIL,CAIE,CAILE,CAIA,CAIGE,CAIN,CAIG:
-	  decode(AC_inst, `aluSUB, E_word, 0, none, none, none);
-	CAM,CAML,CAME,CAMLE,CAMA,CAMGE,CAMN,CAMG:
-	  decode(AC_inst, `aluSUB, read_data, 1, none, none, none);
-
-	JUMP, JUMPL, JUMPE, JUMPLE, JUMPA, JUMPGE, JUMPN, JUMPG:
-	  decode(AC_inst, `aluSETA, read_data, 0, none, none, none);
-
-	AOJ, AOJL, AOJE, AOJLE, AOJA, AOJGE, AOJN, AOJG:
-	  decode(AC_inst, `aluADD, `ONE, 0, none, dispatch, dispatch);
-
-	AOS,AOSL,AOSE,AOSLE,AOSA,AOSGE,AOSN,AOSG:
-	  decode(`ONE, `aluADD, read_data, 1, dispatch, (ac != 0) ? write_finish : none, write_finish);
-
-	// Adding -1 rather than Subtracting 1 makes the carry flags come out right
-	SOJ, SOJL, SOJE, SOJLE, SOJA, SOJGE, SOJN, SOJG:
-	  decode(AC_inst, `aluADD, `MINUSONE, 0, none, dispatch, dispatch);
-
-	// Adding -1 rather than Subtracting 1 makes the carry flags come out right
-	SOS,SOSL,SOSE,SOSLE,SOSA,SOSGE,SOSN,SOSG:
-	  decode(`MINUSONE, `aluADD, read_data, 1, dispatch, (ac != 0) ? write_finish : none, write_finish);
-
-	// Logical Operations
-	SETZI, ANDI, ANDCAI, SETMI, ANDCMI, SETAI, XORI, ORI, // AC <- AC <op> 0,E
-	  ANDCBI, EQVI, SETCAI, ORCAI, SETCMI, ORCMI, ORCBI, SETOI,
-	  SETZ, AND, ANDCA, SETM, ANDCM, SETA, XOR, OR, // AC <- AC <op> C(E)
-	  ANDCB, EQV, SETCA, ORCA, SETCM, ORCM, ORCB, SETO,
-	  SETZM, ANDM, ANDCAM, SETMM, ANDCMM, SETAM, XORM, ORM, // C(E) <- AC <op> C(E)
-	  ANDCBM, EQVM, SETCAM, ORCAM, SETCMM, ORCMM, ORCBM, SETOM,
-	  SETZB, ANDB, ANDCAB, SETMB, ANDCMB, SETAB, XORB, ORB, // C(E) and AC <- AC <op> C(E)
-	  ANDCBB, EQVB, SETCAB, ORCAB, SETCMB, ORCMB, ORCBB, SETOB:
-	    decode(AC_inst, logical_alucmd(inst), mem_src, 
-		   mode_readE(inst), mode_writeE(inst), mode_writeAC(inst), none);
-
-
-	IBP:			// Increment Byte Pointer
-	  decode(`ZERO, `aluIBP, read_data, 1, dispatch, none, none);
-	LDB:					 // Load Byte
-	  decodec(ALUstep, `aluLSH, `MINUSONE, 1, none, none, none); // left shift
-	ILDB:			// Increment and Load Byte
-	  if (state[ldb_loop])
-	    decodec(ALUstep, `aluLSH, `MINUSONE, 1, none, none, none); // left shift
-	  else
-	    decode(`ZERO, `aluIBP, read_data, 1, none, none, none);
-	DPB:			// Deposit Byte
-	  decodec(ALUstep, `aluLSHC, `ZERO, 1, none, none, none); // right shift
-	IDPB:			// Increment and Deposit Byte
-	  if (state[dpb_loop])
-	    decodec(ALUstep, `aluLSHC, `ZERO, 1, none, none, none); // right shift
-	  else
-	    decode(`ZERO, `aluIBP, read_data, 1, none, none, none);
-
-	SKIP,SKIPL,SKIPE,SKIPLE,SKIPA,SKIPGE,SKIPN,SKIPG:
-	  decode(AC_inst, `aluSETM, read_data, 1, none, none, none);
-
-	// Half-word moves
-`ifdef NOTDEF
-	HLL,  HLLI,  HLLM,  HLLS,  HRL,  HRLI,  HRLM,  HRLS,
-	  HLLZ, HLLZI, HLLZM, HLLZS, HRLZ, HRLZI, HRLZM, HRLZS,
-	  HLLO, HLLOI, HLLOM, HLLOS, HRLO, HRLOI, HRLOM, HRLOS,
-	  HLLE, HLLEI, HLLEM, HLLES, HRLE, HRLEI, HRLEM, HRLES,
-	  HRR,  HRRI,  HRRM,  HRRS,  HLR,  HLRI,  HLRM,  HLRS,
-	  HRRZ, HRRZI, HRRZM, HRRZS, HLRZ, HLRZI, HLRZM, HLRZS,
-	  HRRO, HRROI, HRROM, HRROS, HLRO, HLROI, HLROM, HLROS,
-	  HRRE, HRREI, HRREM, HRRES, HLRE, HLREI, HLREM, HLRES:
-	    begin
-	       case (halfword_extend(inst))
-		 extend_none:
-		   case (inst_mode(inst))
-		     mode_basic, mode_immediate: ALUop1 = AC_inst;
-		     mode_memory, mode_self:     ALUop1 = read_data;
-		   endcase
-		 extend_zero: ALUop1 = `ZERO;
-		 extend_ones: ALUop1 = `MINUSONE;
-		 extend_sign: ALUop1 = `ZERO;
-	       endcase
-	       ALUop2 = move_src;
-	       case (inst_mode(inst))
-		 mode_basic: decode_flags(1, none, dispatch, none);
-		 mode_immediate: decode_flags(0, none, dispatch, none);
-		 mode_memory: decode_flags(1, dispatch, none, none);
-		 mode_self: decode_flags(1, dispatch, (ac != 0) ? write_finish : none, none);
-	       endcase
-	       ALUcommand = halfword_alucmd(inst);
-	    end
-`else
- `define SEX(op) NEGATIVE(op) ? `MINUSONE : `ZERO
- `define HSEX(op) HALF_NEGATIVE(op) ? `MINUSONE : `ZERO
-
-	HLL: decode(AC_inst, `aluLL2, read_data, 1, none, dispatch, none);
-	HLLI: decode(AC_inst, `aluLL2, E_word, 0, none, dispatch, none);
-	HLLM: decode(AC_inst, `aluLL1, read_data, 1, dispatch, none, none);
-	HLLS: decode(`ZERO, `aluIOR, read_data, 1, dispatch, (ac != 0) ? write_finish : none, none);
-	HRL: decode(AC_inst, `aluRL2, read_data, 1, none, dispatch, none);
-	HRLI: decode(AC_inst, `aluRL2, E_word, 0, none, dispatch, none);
-	HRLM: decode(AC_inst, `aluRL1, read_data, 1, dispatch, none, none);
-	HRLS: decode(`ZERO, `aluRDUP2, read_data, 1, dispatch, (ac != 0) ? write_finish : none, none);
-		      
-	HLLZ: decode(`ZERO, `aluLL2, read_data, 1, none, dispatch, none);
-	HLLZI: decode(`ZERO, `aluLL2, E_word, 0, none, dispatch, none);
-	HLLZM: decode(AC_inst, `aluLL1, `ZERO, 1, dispatch, none, none);
-	HLLZS: decode(`ZERO, `aluLL2, read_data, 1, dispatch, (ac != 0) ? write_finish : none, none);
-	HRLZ: decode(`ZERO, `aluRL2, read_data, 1, none, dispatch, none);
-	HRLZI: decode(`ZERO, `aluRL2, E_word, 0, none, dispatch, none);
-	HRLZM: decode(AC_inst, `aluRL1, `ZERO, 1, dispatch, none, none);
-	HRLZS: decode(`ZERO, `aluRL2, read_data, 1, dispatch, (ac != 0) ? write_finish : none, none);
-	
-	HLLO: decode(`MINUSONE, `aluLL2, read_data, 1, none, dispatch, none);
-	HLLOI: decode(`MINUSONE, `aluLL2, E_word, 0, none, dispatch, none);
-	HLLOM: decode(AC_inst, `aluLL1, `MINUSONE, 1, dispatch, none, none);
-	HLLOS: decode(`MINUSONE, `aluLL2, read_data, 1, dispatch, (ac != 0) ? write_finish : none, none);
-	HRLO: decode(`MINUSONE, `aluRL2, read_data, 1, none, dispatch, none);
-	HRLOI: decode(`MINUSONE, `aluRL2, E_word, 0, none, dispatch, none);
-	HRLOM: decode(AC_inst, `aluRL1, `MINUSONE, 1, dispatch, none, none);
-	HRLOS: decode(`MINUSONE, `aluRL2, read_data, 1, dispatch, (ac != 0) ? write_finish : none, none);
-	
-	HLLE: decode(`SEX(read_data), `aluLL2, read_data, 1, none, dispatch, none);
-	HLLEI: decode(`SEX(E_word), `aluLL2, E_word, 0, none, dispatch, none);
-	HLLEM: decode(AC_inst, `aluLL1, `SEX(AC_inst), 1, dispatch, none, none);
-	HLLES: decode(`SEX(read_data), `aluLL2, read_data, 1, dispatch, (ac != 0) ? write_finish : none, none);
-	HRLE: decode(`HSEX(RIGHT(ALUop2)), `aluRL2, read_data, 1, none, dispatch, none);
-	HRLEI: decode(`HSEX(E), `aluRL2, E_word, 0, none, dispatch, none);
-	HRLEM: decode(AC_inst, `aluRL1, `HSEX(RIGHT(AC_inst)), 1, dispatch, none, none);
-	HRLES: decode(`HSEX(RIGHT(read_data)), `aluRL2, read_data, 1, dispatch, (ac != 0) ? write_finish : none, none);
-	
-	HRR: decode(AC_inst, `aluRR2, read_data, 1, none, dispatch, none);
-	HRRI: decode(AC_inst, `aluRR2, E_word, 0, none, dispatch, none);
-	HRRM: decode(AC_inst, `aluRR1, read_data, 1, dispatch, none, none);
-	HRRS: decode(`ZERO, `aluIOR, read_data, 1, dispatch, (ac != 0) ? write_finish : none, none);
-	HLR: decode(SWAP(AC_inst), `aluLR2, SWAP(read_data), 1, none, dispatch, none);
-	HLRI: decode(SWAP(AC_inst), `aluLR2, SWAP(E_word), 0, none, dispatch, none);
-	HLRM: decode(SWAP(AC_inst), `aluLR1, SWAP(read_data), 1, dispatch, none, none);
-	HLRS: decode(SWAP(AC_inst), `aluRDUP2, SWAP(read_data), 1, dispatch, (ac != 0) ? write_finish : none, none);
-		      
-	HRRZ: decode(`ZERO, `aluRR2, read_data, 1, none, dispatch, none);
-	HRRZI: decode(`ZERO, `aluRR2, E_word, 0, none, dispatch, none);
-	HRRZM: decode(AC_inst, `aluRR1, `ZERO, 1, dispatch, none, none);
-	HRRZS: decode(`ZERO, `aluRR2, read_data, 1, dispatch, (ac != 0) ? write_finish : none, none);
-	HLRZ: decode(`ZERO, `aluLR2, SWAP(read_data), 1, none, dispatch, none);
-	HLRZI: decode(`ZERO, `aluLR2, SWAP(E_word), 0, none, dispatch, none);
-	HLRZM: decode(SWAP(AC_inst), `aluLR1, `ZERO, 1, dispatch, none, none);
-	HLRZS: decode(`ZERO, `aluLR2, SWAP(read_data), 1, dispatch, (ac != 0) ? write_finish : none, none);
-	
-	HRRO: decode(`MINUSONE, `aluRR2, read_data, 1, none, dispatch, none);
-	HRROI: decode(`MINUSONE, `aluRR2, E_word, 0, none, dispatch, none);
-	HRROM: decode(AC_inst, `aluRR1, `MINUSONE, 1, dispatch, none, none);
-	HRROS: decode(`MINUSONE, `aluRR2, read_data, 1, dispatch, (ac != 0) ? write_finish : none, none);
-	HLRO: decode(`MINUSONE, `aluLR2, SWAP(read_data), 1, none, dispatch, none);
-	HLROI: decode(`MINUSONE, `aluLR2, SWAP(E_word), 0, none, dispatch, none);
-	HLROM: decode(SWAP(AC_inst), `aluLR1, `MINUSONE, 1, dispatch, none, none);
-	HLROS: decode(`MINUSONE, `aluLR2, SWAP(read_data), 1, dispatch, (ac != 0) ? write_finish : none, none);
-	
-	HRRE: decode(`HSEX(RIGHT(read_data)), `aluRR2, read_data, 1, none, dispatch, none);
-	HRREI: decode(`HSEX(E), `aluRR2, E_word, 0, none, dispatch, none);
-	HRREM: decode(AC_inst, `aluRR1, `HSEX(RIGHT(AC_inst)), 1, dispatch, none, none);
-	HRRES: decode(`HSEX(RIGHT(read_data)), `aluRR2, read_data, 1, dispatch, (ac != 0) ? write_finish : none, none);
-	HLRE: decode(`SEX(read_data), `aluLR2, SWAP(read_data), 1, none, dispatch, none);
-	HLREI: decode(`SEX(E_word), `aluLR2, SWAP(E_word), 0, none, dispatch, none);
-	HLREM: decode(SWAP(AC_inst), `aluLR1, `SEX(AC_inst), 1, dispatch, none, none);
-	HLRES: decode(`SEX(read_data), `aluLR2, SWAP(read_data), 1, dispatch, (ac != 0) ? write_finish : none, none);
-`endif	  
-
-	// Logical Testing and Modification (Bit Testing)
-	TRN, TRNE, TRNA, TRNN, TRZ, TRZE, TRZA, TRZN, TRC, TRCE, TRCA, TRCN, TRO, TROE, TROA, TRON:
-	  decode(AC_inst, test_op, E_word, 0, none, dispatch, none);
-	TLN, TLNE, TLNA, TLNN, TLZ, TLZE, TLZA, TLZN, TLC, TLCE, TLCA, TLCN, TLO, TLOE, TLOA, TLON:
-	  decode(AC_inst, test_op, SWAP(E_word), 0, none, dispatch, none);
-	TDN, TDNE, TDNA, TDNN, TDZ, TDZE, TDZA, TDZN, TDC, TDCE, TDCA, TDCN, TDO, TDOE, TDOA, TDON:
-	  decode(AC_inst, test_op, read_data, 1, none, dispatch, none);
-	TSN, TSNE, TSNA, TSNN, TSZ, TSZE, TSZA, TSZN, TSC, TSCE, TSCA, TSCN, TSO, TSOE, TSOA, TSON:
-	  decode(AC_inst, test_op, SWAP(read_data), 1, none, dispatch, none);
-
-	IO_INSTRUCTION:
-	  if (user_mode)
-	    unassigned_code = 1; // needs to be a MUUO !!!
-	  else
-	    case (IOOP(inst))
-	      // the APR and PI devices are caight here, everything else is sent out the I/O bus
-	      CONO:		// Conditions Out
-		decodeIO(AC_inst, `aluSETM, E_word, 0, none, 0, dispatch, 1);
-	      CONI:		// Conditions In
-		case (IODEV(inst))
-		  APR:
-		    decodeIO(apr_status, `aluSETA, read_data, 0, dispatch, 1, none, 1);
-		  PI:
-		    decodeIO(pi_status, `aluSETA, read_data, 0, dispatch, 1, none, 1);
-		  default:
-		    decodeIO(AC_inst, `aluSETM, read_data, 0, dispatch, 1, none, 1);
-		endcase // casex (IODEV(inst))
-	      CONSZ, CONSO:	// Conditions In and Skip if Zero/One
-		case (IODEV(inst))
-		  APR:
-		    decodeIO(apr_status, `aluSETA, read_data, 0, none, 1, none, 1);
-		  PI:
-		    decodeIO(pi_status, `aluSETA, read_data, 0, none, 1, none, 1);
-		  default:
-		    decodeIO(AC_inst, `aluSETM, read_data, 0, none, 1, none, 1);
-		endcase // casex (IODEV(inst))
-	      DATAO:		// Data Out
-		decodeIO(AC_inst, `aluSETM, read_data, 1, none, 0, dispatch, 0);
-	      DATAI:		// Data In
-		case (IODEV(inst))
-		  APR:
-		    decodeIO(switch_register, `aluSETA, read_data, 0, dispatch, 1, none, 0);
-		  default:
-		    decodeIO(AC_inst, `aluSETM, read_data, 0, dispatch, 1, none, 0);
-		endcase
-	      BLKI, BLKO:	// Block In/Out -- gotta get to these one day !!!
-		unassigned_code = 1;
-	    endcase
-      endcase
-   end // always @ begin
 
 `include "opcodes.vh"
    
@@ -2545,7 +3675,7 @@ module apr
 	 endcase // case (1'b1)
       end // else: !if(mem_in_progress && !(read_ack || write_ack))
    end
-
+`endif //  `ifdef NOTDEF
 
 endmodule // APR
 

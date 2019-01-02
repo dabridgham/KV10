@@ -91,5 +91,5 @@
  
  o Check that MUUOs and LUUOs read from the appropriate memory space.
  
- o Rewrite JFFO to use combinational logic rather than a shift and loop.
+ o Decide if I want BLT to count as one instruction or once for each iteration
 
