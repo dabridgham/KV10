@@ -125,21 +125,21 @@ module apr
    localparam
      Asel_one = 0,
      Asel_minusone = 1,
-     Asel_Mreg = 2,
-     Asel_Areg = 3,
+     Asel_Areg = 2,
+     Asel_Mreg = 3,
      Asel_PC = 4,
-     Asel_E = 5,
-     Asel_AC = 6,
+     Asel_AC = 5,
+     Asel_E = 6,
      Asel_BPmask = 7;
    always @(*)
      case (Asel)
        Asel_one: Amux = `ONE;
        Asel_minusone: Amux = `MINUSONE;
-       Asel_Mreg: Amux = Mreg;
        Asel_Areg: Amux = Areg;
+       Asel_Mreg: Amux = Mreg;
        Asel_PC: Amux = { PSW, PC };
-       Asel_E: Amux = { `HALFSIZE'd0, E };
        Asel_AC: Amux = AC;
+       Asel_E: Amux = { `HALFSIZE'd0, E };
        Asel_BPmask: Amux = bp_mask(BP_S);
        default: Amux = AC;
      endcase // case (Asel)
@@ -232,16 +232,16 @@ module apr
    reg [`WORD] 	      write_data;
    reg [0:2] 	      Csel;
    localparam
-     Csel_read_data = 0,
-     Csel_io_data = 1,
-     Csel_ALUresult = 2,
-     Csel_start_addr = 3;
+     Csel_ALUresult = 0,
+     Csel_start_addr = 1,
+     Csel_read_data = 2,
+     Csel_io_data = 3;
    always @(*)
      case (Csel)
-       Csel_read_data: write_data = read_data;
-       Csel_io_data: write_data = read_data; // not yet implemented !!!
        Csel_ALUresult: write_data = Calu;
        Csel_start_addr: write_data = `WORDSIZE'o01000;
+       Csel_read_data: write_data = read_data;
+       Csel_io_data: write_data = read_data; // not yet implemented !!!
        default: write_data = X;
      endcase // case (Csel)
    assign mem_write_data = write_data; // send it to the memory too
