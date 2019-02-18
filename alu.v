@@ -5,6 +5,9 @@
 // 2013-01-31 dab	initial version
 
 
+// verilator lint_off LITENDIAN
+// this program calls Big Endian bit fields Little Endian, for some reason, and flags them as errors.
+
 `timescale 1 ns / 1 ns
 
 `include "constants.vh"
@@ -107,7 +110,10 @@ module alu
       shift_arith = 0;
       shift_rotate = 0;
       
+      // verilator lint_off CASEINCOMPLETE
       case (command)		// synopsys full_case parallel_case
+      // verilator lint_on CASEINCOMPLETE
+
 	// logical instructions - command is pulled straight out of the opcode
 	`aluSETZ:	result = 0;
 	`aluAND:	result = A & M;
