@@ -11,78 +11,257 @@ module alu_tb#(parameter width=36)();
    reg reset = 0;
    
    reg [`aluCMDwidth-1:0] command;
-   reg [width-1:0] 	  op1high; // doubleword operations are op1high,op1
-   reg [width-1:0] 	  op1; // first operand
-   reg [width-1:0] 	  op2; // second operand
+   reg [width-1:0] 	  Alow; // doubleword operations are A,Alow
+   reg [width-1:0] 	  A; // first operand
+   reg [width-1:0] 	  M; // second operand
 
-   wire [width-1:0] 	  resulthigh;
+   wire [width-1:0] 	  result;
    wire [width-1:0] 	  resultlow;
    wire 		  overflow;
    wire 		  carry0;
    wire 		  carry1;
    wire 		  zero;
-   wire 		  busy;
 
 
    initial begin
       $dumpfile("tb-alu.lxt");
       $dumpvars(0,alu_tb);
 
-      #1 reset = 1;
-      #10 reset = 0;
-
       #4 command = `aluADD;
-      op1high = 0;
-      op1 = 7;
-      op2 = 13;
+      Alow = 0;
+      A = 7;
+      M = 13;
 
       #4 command = `aluSUB;
-      op1 = 1;
-      op2 = -2;
+      A = 1;
+      M = -2;
 
       #4 command = `aluADD;
-      op1 = 1;
-      op2 = -2;
+      A = 1;
+      M = -2;
 
       #4 command = `aluSUB;
-      op1 = 3;
-      op2 = 3;
+      A = 3;
+      M = 3;
 
       #4 command = `aluADD;
-      op1 = 36'o377777_777777;
-      op2 = 1;
+      A = 36'o377777_777777;
+      M = 1;
 
       #4 command = `aluADD;
-      op1 = 36'o777777_777777;
-      op2 = 1;
+      A = 36'o777777_777777;
+      M = 1;
 
       #4 command = `aluSUB;
-      op1 = 36'o400000_000000;
-      op2 = 1;
+      A = 36'o400000_000000;
+      M = 1;
 
       #4 command = `aluLSH;
-      op1 = 36'o000004_000000;
-      op2 = 1;
-      #1 while (busy) #1 command = `aluLSH;
-      command = `aluOFF;
+      A = 36'o000004_000000;
+      M = 1;
 
       #10 command = `aluLSH;
-      op1 = 36'o000004_000000;
-      op2 = 2;
-      #1 while (busy) #1 command = `aluLSH;
-      command = `aluOFF;
+      A = 36'o000004_000000;
+      M = 2;
 
       #10 command = `aluLSH;
-      op1 = 36'o000004_000000;
-      op2 = -4;
-      #1 while (busy) #1 command = `aluLSH;
-      command = `aluOFF;
+      A = 36'o000004_000000;
+      M = -4;
 
       #10 command = `aluLSH;
-      op1 = 36'o000004_000000;
-      op2 = -10;
-      #1 while (busy) #1 command = `aluLSH;
-      command = `aluOFF;
+      A = 36'o000004_000000;
+      M = -10;
+
+      #10 command = `aluROTC;
+//      A = 36'o230703_603700;
+//      Alow = 36'o770037_600377;
+      #1 A = 0;
+      #1 Alow = 36'o000007_000000;
+      #1 M = 36'o374;
+      #1 $display("ROTC: %o,%o %o -> %o,%o", A, Alow, M, result, resultlow);
+      
+      #1 $finish();
+
+      #10 command = `aluROTC;
+      A = 0;
+      Alow = 36'o000007_000000;
+      M = 1;
+      #1 $display("ROTC: %o,%o %o -> %o,%o", A, Alow, M, result, resultlow);
+      
+      #10 command = `aluROTC;
+      A = 0;
+      Alow = 36'o000007_000000;
+      M = 2;
+      #1 $display("ROTC: %o,%o %o -> %o,%o", A, Alow, M, result, resultlow);
+      
+      #10 command = `aluROTC;
+      A = 0;
+      Alow = 36'o000007_000000;
+      M = 4;
+      #1 $display("ROTC: %o,%o %o -> %o,%o", A, Alow, M, result, resultlow);
+      
+      #10 command = `aluROTC;
+      A = 0;
+      Alow = 36'o000007_000000;
+      M = 8;
+      #1 $display("ROTC: %o,%o %o -> %o,%o", A, Alow, M, result, resultlow);
+      
+      #10 command = `aluROTC;
+      A = 0;
+      Alow = 36'o000007_000000;
+      M = 16;
+      #1 $display("ROTC: %o,%o %o -> %o,%o", A, Alow, M, result, resultlow);
+      
+      #10 command = `aluROTC;
+      A = 0;
+      Alow = 36'o000007_000000;
+      M = 32;
+      #1 $display("ROTC: %o,%o %o -> %o,%o", A, Alow, M, result, resultlow);
+      
+      #10 command = `aluROTC;
+      A = 0;
+      Alow = 36'o000007_000000;
+      M = 'o374;
+      #1 $display("ROTC: %o,%o %o -> %o,%o", A, Alow, M, result, resultlow);
+      
+      #10 command = `aluROTC;
+      A = 0;
+      Alow = 36'o000007_000000;
+      M = 64;
+      #1 $display("ROTC: %o,%o %o -> %o,%o", A, Alow, M, result, resultlow);
+      
+      #10 command = `aluROTC;
+      A = 0;
+      Alow = 36'o000007_000000;
+      M = 128;
+      #1 $display("ROTC: %o,%o %o -> %o,%o", A, Alow, M, result, resultlow);
+      
+      #1 $finish();
+      
+
+      #10 command = `aluROTC;
+      A = 36'o000000_000000;
+      Alow = 36'o000000_000001;
+      M = 0;
+      #1 $display("ROTC: %o,%o %o -> %o,%o", A, Alow, M, result, resultlow);
+      
+      #10 command = `aluROTC;
+      A = 36'o000000_000000;
+      Alow = 36'o000000_000001;
+      M = 1;
+      #1 $display("ROTC: %o,%o %o -> %o,%o", A, Alow, M, result, resultlow);
+      
+      #10 command = `aluROTC;
+      A = 36'o000000_000000;
+      Alow = 36'o000000_000001;
+      M = 2;
+      #1 $display("ROTC: %o,%o %o -> %o,%o", A, Alow, M, result, resultlow);
+      
+      #10 command = `aluROTC;
+      A = 36'o000000_000000;
+      Alow = 36'o000000_000001;
+      M = 4;
+      #1 $display("ROTC: %o,%o %o -> %o,%o", A, Alow, M, result, resultlow);
+      
+      #10 command = `aluROTC;
+      A = 36'o000000_000000;
+      Alow = 36'o000000_000001;
+      M = 8;
+      #1 $display("ROTC: %o,%o %o -> %o,%o", A, Alow, M, result, resultlow);
+
+      #10 command = `aluROTC;
+      A = 36'o000000_000000;
+      Alow = 36'o000000_000001;
+      M = 16;
+      #1 $display("ROTC: %o,%o %o -> %o,%o", A, Alow, M, result, resultlow);
+
+      #10 command = `aluROTC;
+      A = 36'o000000_000000;
+      Alow = 36'o000000_000001;
+      M = 32;
+      #1 $display("ROTC: %o,%o %o -> %o,%o", A, Alow, M, result, resultlow);
+
+      #10 command = `aluROTC;
+      A = 36'o000000_000000;
+      Alow = 36'o000000_000001;
+      M = 64;
+      #1 $display("ROTC: %o,%o %o -> %o,%o", A, Alow, M, result, resultlow);
+
+      #10 command = `aluROTC;
+      A = 36'o000000_000000;
+      Alow = 36'o000000_000001;
+      M = 128;
+      #1 $display("ROTC: %o,%o %o -> %o,%o", A, Alow, M, result, resultlow);
+
+      #10 command = `aluROTC;
+      A = 36'o000000_000000;
+      Alow = 36'o000000_000001;
+      M = 256;
+      #1 $display("ROTC: %o,%o %o -> %o,%o", A, Alow, M, result, resultlow);
+      
+      #10 command = `aluROTC;
+      A = 36'o777777_777777;
+      Alow = 36'o777777_777776;
+      M = 1;
+      #1 $display("ROTC: %o,%o %o -> %o,%o", A, Alow, M, result, resultlow);
+      
+      #10 command = `aluROTC;
+      A = 36'o777777_777777;
+      Alow = 36'o777777_777776;
+      M = 2;
+      #1 $display("ROTC: %o,%o %o -> %o,%o", A, Alow, M, result, resultlow);
+      
+      #10 command = `aluROTC;
+      A = 36'o777777_777777;
+      Alow = 36'o777777_777776;
+      M = 4;
+      #1 $display("ROTC: %o,%o %o -> %o,%o", A, Alow, M, result, resultlow);
+      
+      #10 command = `aluROTC;
+      A = 36'o777777_777777;
+      Alow = 36'o777777_777776;
+      M = 8;
+      #1 $display("ROTC: %o,%o %o -> %o,%o", A, Alow, M, result, resultlow);
+
+      #10 command = `aluROTC;
+      A = 36'o777777_777777;
+      Alow = 36'o777777_777776;
+      M = 16;
+      #1 $display("ROTC: %o,%o %o -> %o,%o", A, Alow, M, result, resultlow);
+
+      #10 command = `aluROTC;
+      A = 36'o777777_777777;
+      Alow = 36'o777777_777776;
+      M = 32;
+      #1 $display("ROTC: %o,%o %o -> %o,%o", A, Alow, M, result, resultlow);
+
+      #10 command = `aluROTC;
+      A = 36'o777777_777777;
+      Alow = 36'o777777_777776;
+      M = 64;
+      #1 $display("ROTC: %o,%o %o -> %o,%o", A, Alow, M, result, resultlow);
+
+      #10 command = `aluROTC;
+      A = 36'o777777_777777;
+      Alow = 36'o777777_777776;
+      M = 128;
+      #1 $display("ROTC: %o,%o %o -> %o,%o", A, Alow, M, result, resultlow);
+
+      #10 command = `aluROTC;
+      A = 36'o777777_777777;
+      Alow = 36'o777777_777776;
+      M = 256;
+      #1 $display("ROTC: %o,%o %o -> %o,%o", A, Alow, M, result, resultlow);
+
+      // right shifts
+
+      #10 command = `aluROTC;
+      A = 36'o000000_000000;
+      Alow = 36'o000000_000001;
+      M = -2;
+      #1 $display("ROTC: %o,%o %o -> %o,%o", A, Alow, M, result, resultlow);
+      
+      
 
       #40 $finish;
 
@@ -91,7 +270,7 @@ module alu_tb#(parameter width=36)();
    reg clk = 0;
    always #1 clk = !clk;
 
-   alu alu(clk, reset, command, op1high, op1, op2, resulthigh, resultlow, overflow, carry0, carry1, zero, busy);
+   alu alu(command, Alow, A, M, resultlow, result, carry0, carry1, overflow, zero);
 
 
 endmodule // alu_tb

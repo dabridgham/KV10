@@ -9,6 +9,8 @@
 // 2-15-02-07 dab	async is faster and that's awesome but the actual memory, either internal to the
 //			FPGA or external, is synchronous so make this the same.
 
+`timescale 1 ns / 1 ns
+
 `include "constants.vh"
 
 module mem
@@ -29,7 +31,7 @@ module mem
 
    reg [30*8:1]       filename;
 
-   reg 		      read_ip, write_ip;
+   reg 		      read_ip, write_ip, rw_done;
    reg [`PADDR]       saved_addr;
    reg [`WORD] 	      saved_write_data;
 
@@ -46,6 +48,7 @@ module mem
 
       read_ip <= 0;
       write_ip <= 0;
+      rw_done <= 0;
 
       wait_count <= 0;
    end
@@ -57,6 +60,8 @@ module mem
 
       if (wait_count != 0)
 	wait_count <= wait_count - 1;
+      else if (rw_done)
+	rw_done <= 0;
       else begin
 	 if (read_ip) begin
 	    mem_read_data <= ram[saved_addr];
@@ -72,6 +77,7 @@ module mem
 	   if (wait_time == 0) begin
 	      mem_read_data <= ram[mem_addr];
 	      read_ack <= 1;
+	      rw_done <= 1;
 	   end else begin
 	      saved_addr <= mem_addr;
 	      read_ip <= 1;
@@ -81,6 +87,7 @@ module mem
 	   if (wait_time == 0) begin
 	      ram[mem_addr] <= mem_write_data;
 	      write_ack <= 1;
+	      rw_done <= 1;
 	   end else begin
 	      saved_addr <= mem_addr;
 	      saved_write_data <= mem_write_data;

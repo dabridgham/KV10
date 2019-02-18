@@ -31,13 +31,13 @@
 
  o Implement floating-point.
 
- o Implement a barrel shifter. [Code started in barrel.v]
-
  o Check that I can execute instructions out of the Accumulators
 
  o See about moving alu_one to the other ALU input (only used in AOJ and AOS)
 
  o Write diagnositcs for CIRC.
+
+ o The diagnostics for ASH and LSH are woefully incomplete.  Write some more.
 
  o Move the AC+1 read and write operations into the memory read/write blocks and see if
    that reduces LE count.
@@ -76,9 +76,6 @@
  
  o Add stats to the cache.
  
- o Change ALUcount_inc and ALUcount_dec to be ALUcount+1 and ALUcount-1 to see which comes
-   out smaller in the FPGA.
-
  o Move the bp_mask function into the ALU.
 
  o Look into making writing to the ACs at the end of an instruction be driven by the async
@@ -91,5 +88,5 @@
  
  o Check that MUUOs and LUUOs read from the appropriate memory space.
  
- o Rewrite JFFO to use combinational logic rather than a shift and loop.
+ o Decide if I want BLT to count as one instruction or once for each iteration
 

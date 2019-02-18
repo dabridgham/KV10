@@ -5,7 +5,7 @@
 // 2013-02-01 dab	initial version
 // 2015-01-19 dab	added pag
 
-`timescale 100 us / 100 us
+`timescale 1 ns / 1 ns
 
 `include "constants.vh"
 `include "alu.vh"
@@ -63,14 +63,14 @@ module apr_tb();
       $dumpvars(0,apr_tb);
 
       #0 reset = 1;
-      #32 reset = 0;
-      
+      #300 reset = 0;
 
-      # 800000 $finish_and_return(2);
+      #5000000 $display("Out of time");
+      $finish_and_return(2);
    end
    
    reg 		   clk = 0;
-   always #5 clk = !clk;
+   always #50 clk = !clk;
 
    assign apr_pi = 0;		// once the Cache and IOM are written, this assignment goes away
    
@@ -79,7 +79,7 @@ module apr_tb();
 	   apr_write_ack, apr_read_ack, apr_nxm, apr_page_fail, apr_pi,
 	   display_addr, running);
 
-`ifdef SIM
+`ifdef NOTDEF
    pag pag(clk, reset, 
 	   apr_addr, apr_read_data, apr_write_data, apr_user, apr_write, apr_read, apr_io_write, apr_io_read,
 	   apr_write_ack, apr_read_ack, apr_nxm, apr_page_fail, apr_pi,

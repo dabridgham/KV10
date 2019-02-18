@@ -4,7 +4,7 @@
 //
 // 2013-02-02 dab	initial version
 
-// This is not a standalong file but expected to be included at just the right place in APR
+// This is not a standalone file but expected to be included at just the right place in APR
 
 reg [6*8:0] opcodes[0:9'o677];
 reg [6*8:0] io_opcodes[0:7];
@@ -540,52 +540,60 @@ end // initial begin
       reg [4*8:1] 	index;
       reg [3*8:1] 	ac;
       reg [0:6] 	dev;
+
+      reg [`HWORD] 	Y;
+      reg [0:3] 	A;
+      reg [0:3] 	X;
  	
       begin
-	 indirect = I(inst) ? "@" : " ";
-	 if (A(inst) == 0)
+	 Y = instY(inst);
+	 A = instA(inst);
+	 X = instX(inst);
+	 
+	 indirect = instI(inst) ? "@" : " ";
+	 if (instA(inst) == 0)
 	   ac = "   ";
 	 else
-	   $sformat(ac, "%o,", A(inst));
-	 if (X(inst) == 0)
+	   $sformat(ac, "%o,", A);
+	 if (instX(inst) == 0)
 	   index = "    ";
 	 else
-	   $sformat(index, "(%o)", X(inst));
+	   $sformat(index, "(%o)", X);
 
-	 dev = IODEV(inst)*4;
+	 dev = instIODEV(inst)*4;
 	       
-	 if (OP(inst) < 9'o700) begin
-	    $sformat(result, "%s  %s%s%o%s", opcodes[OP(inst)], ac, indirect, Y(inst), index);
+	 if (instOP(inst) < 9'o700) begin
+	    $sformat(result, "%s  %s%s%o%s", opcodes[instOP(inst)], ac, indirect, Y, index);
 	    disasm = result;
 	 end else begin
 	    // I/O Instruction
-	    $sformat(result, "%s %o,%s%o%s", io_opcodes[IOOP(inst)], dev, indirect, Y(inst), index);
+	    $sformat(result, "%s %o,%s%o%s", io_opcodes[instIOOP(inst)], dev, indirect, Y, index);
 	    disasm = result;
-	    end
+	 end
       end
    endfunction
 
    task print_ac;
       begin
 	 $display("0: %o,%o  4: %o,%o  10: %o,%o  14: %o,%o",
-		  LEFT(accumulators[0]), RIGHT(accumulators[0]),
-	    	  LEFT(accumulators[4]), RIGHT(accumulators[4]),
-	    	  LEFT(accumulators[8]), RIGHT(accumulators[8]),
-	    	  LEFT(accumulators[12]), RIGHT(accumulators[12]));
+		  accumulators[0][0:17], accumulators[0][18:35],
+		  accumulators[4][0:17], accumulators[4][18:35],
+		  accumulators[8][0:17], accumulators[8][18:35],
+		  accumulators[12][0:17], accumulators[12][18:35]);
 	 $display("1: %o,%o  5: %o,%o  11: %o,%o  15: %o,%o",
-		  LEFT(accumulators[1]), RIGHT(accumulators[1]),
-	    	  LEFT(accumulators[5]), RIGHT(accumulators[5]),
-	    	  LEFT(accumulators[9]), RIGHT(accumulators[9]),
-	    	  LEFT(accumulators[13]), RIGHT(accumulators[13]));
+		  accumulators[1][0:17], accumulators[1][18:35],
+		  accumulators[5][0:17], accumulators[5][18:35],
+		  accumulators[9][0:17], accumulators[9][18:35],
+		  accumulators[13][0:17], accumulators[13][18:35]);
 	 $display("2: %o,%o  6: %o,%o  12: %o,%o  16: %o,%o",
-		  LEFT(accumulators[2]), RIGHT(accumulators[2]),
-	    	  LEFT(accumulators[6]), RIGHT(accumulators[6]),
-	    	  LEFT(accumulators[10]), RIGHT(accumulators[10]),
-	    	  LEFT(accumulators[14]), RIGHT(accumulators[14]));
+		  accumulators[2][0:17], accumulators[2][18:35],
+		  accumulators[6][0:17], accumulators[6][18:35],
+		  accumulators[10][0:17], accumulators[10][18:35],
+		  accumulators[14][0:17], accumulators[14][18:35]);
 	 $display("3: %o,%o  7: %o,%o  13: %o,%o  17: %o,%o",
-		  LEFT(accumulators[3]), RIGHT(accumulators[3]),
-	    	  LEFT(accumulators[7]), RIGHT(accumulators[7]),
-	    	  LEFT(accumulators[11]), RIGHT(accumulators[11]),
-	    	  LEFT(accumulators[15]), RIGHT(accumulators[15]));
+		  accumulators[3][0:17], accumulators[3][18:35],
+		  accumulators[7][0:17], accumulators[7][18:35],
+		  accumulators[11][0:17], accumulators[11][18:35],
+		  accumulators[15][0:17], accumulators[15][18:35]);
       end
    endtask // print_ac
