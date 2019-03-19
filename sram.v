@@ -19,8 +19,8 @@ module de2_sram
    reg [7:0] 	upper [0:2**20-1];
    reg [7:0] 	lower [0:2**20-1];
 
-   assign data_bus[15:8] = (~CE_n && ~OE_n && ~UB_n && WE_n) ? upper[addr] : z;
-   assign data_bus[7:0] = (~CE_n && ~OE_n && ~LB_n && WE_n) ? lower[addr] : z;
+   assign data_bus[15:8] = (~CE_n && ~OE_n && ~UB_n && WE_n) ? upper[addr] : 'z;
+   assign data_bus[7:0] = (~CE_n && ~OE_n && ~LB_n && WE_n) ? lower[addr] : 'z;
 
    always @(CE_n, WE_n) begin
       if (~CE_n && ~WE_n) begin

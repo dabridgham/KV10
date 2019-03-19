@@ -1,8 +1,6 @@
 // 	-*- mode: Verilog; fill-column: 90 -*-
 //
 // Utility functions
-//
-// 2013-02-03 dab	initial version
 
 
 // Pull apart words

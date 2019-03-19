@@ -69,7 +69,7 @@ module apr_tb();
       $finish_and_return(2);
    end
    
-   reg 		   clk = 0;
+   reg 		   clk = 1;
    always #50 clk = !clk;
 
    assign apr_pi = 0;		// once the Cache and IOM are written, this assignment goes away

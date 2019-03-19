@@ -40,7 +40,7 @@ module mem_sram
    endfunction // case
 
    assign sram_addr = { mem_addr, byte_index };
-   assign sram_data_bus = WE_n ? z : { 7'b0, write_bits(byte_index) };
+   assign sram_data_bus = WE_n ? 'z : { 7'b0, write_bits(byte_index) };
    
 
    initial begin

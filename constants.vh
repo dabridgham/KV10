@@ -1,8 +1,6 @@
 // 	-*- mode: Verilog; fill-column: 90 -*-
 //
 // KV10 definitions
-//
-// 2013-02-01 dab	initial version
 
 `define WORDSIZE 36
 `define HALFSIZE 18

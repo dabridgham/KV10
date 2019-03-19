@@ -90,3 +90,14 @@
  
  o Decide if I want BLT to count as one instruction or once for each iteration
 
+ o Write diagnostic to test that the processor does the right thing when a higher-priority
+   interrupt happens in between the two instructions of a two instruction interrupt
+   vector.
+
+ o Load PC from mem_addr rather than write_data to save a microcycle on several
+ instructions
+ 
+ o Write diagnostic to check that processor flags aren't set in the case of a memory fault
+ 
+ o JSR and PUSHJ (and JSP?) could benefit by putting PSW,PCnext on Mmux
+ 

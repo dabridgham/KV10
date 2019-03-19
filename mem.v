@@ -1,13 +1,6 @@
 //	-*- mode: Verilog; fill-column: 90 -*-
 //
 // Hacked up memory for testing
-//
-// 2013-02-01 dab	initial version
-// 2014-01-01 dab	work on the posedge and get wait_time to work right
-// 2015-01-21 dab	modified to be async read instead of synchronous and full sized physical memory
-//
-// 2-15-02-07 dab	async is faster and that's awesome but the actual memory, either internal to the
-//			FPGA or external, is synchronous so make this the same.
 
 `timescale 1 ns / 1 ns
 
@@ -53,47 +46,73 @@ module mem
       wait_count <= 0;
    end
 
+   // hack for pushing the ack asynchronously so it's there a cycle earlier than the data.
+   // only works if wait_time is 0.
+   always @(*) read_ack = mem_read;
+   always @(*) write_ack = mem_write;
+
    always @(posedge clk) begin
       nxm <= 0;			// all memory exists
       write_ack <= 0;
-      read_ack <= 0;
+//      read_ack <= 0;
 
       if (wait_count != 0)
 	wait_count <= wait_count - 1;
-      else if (rw_done)
-	rw_done <= 0;
-      else begin
+      else if (rw_done) begin
+	 $display("done");
+	 rw_done <= 0;
+      end else begin
 	 if (read_ip) begin
+//`define DEBUG_MEM
+`ifdef DEBUG_MEM
+	    $display("   <-- [%06o]", mem_addr);
+`endif
 	    mem_read_data <= ram[saved_addr];
-	    read_ack <= 1;
+//	    read_ack <= 1;
 	    read_ip <= 0;
 	 end else if (write_ip) begin
+`ifdef DEBUG_MEM
+	    $display("   [%06o] <-- %06o,%06o", saved_addr, saved_write_data[0:17], saved_write_data[18:35]);
+`endif
 	    ram[saved_addr] <= saved_write_data;
-	    write_ack <= 1;
+//	    write_ack <= 1;
 	    write_ip <= 0;
 	 end
 	   
-	 if (mem_read)
-	   if (wait_time == 0) begin
-	      mem_read_data <= ram[mem_addr];
-	      read_ack <= 1;
-	      rw_done <= 1;
-	   end else begin
-	      saved_addr <= mem_addr;
-	      read_ip <= 1;
-	      wait_count <= wait_time - 1;
-	   end
-	 else if (mem_write)
-	   if (wait_time == 0) begin
-	      ram[mem_addr] <= mem_write_data;
-	      write_ack <= 1;
-	      rw_done <= 1;
-	   end else begin
-	      saved_addr <= mem_addr;
-	      saved_write_data <= mem_write_data;
-	      write_ip <= 1;
-	      wait_count <= wait_time - 1;
-	   end
+	 if (mem_read) begin
+`ifdef DEBUG_MEM
+	    $write("Reading ");
+`endif
+	    if (wait_time == 0) begin
+`ifdef DEBUG_MEM
+	       $display("   <-- [%06o]", mem_addr);
+`endif
+	       mem_read_data <= ram[mem_addr];
+//	      read_ack <= 1;
+	       rw_done <= 0;
+	    end else begin
+	       saved_addr <= mem_addr;
+	       read_ip <= 1;
+	       wait_count <= wait_time - 1;
+	    end
+	 end else if (mem_write) begin // if (mem_read)
+`ifdef DEBUG_MEM
+	    $write("Writing ");
+`endif
+	    if (wait_time == 0) begin
+`ifdef DEBUG_MEM
+	       $display("   [%06o] <-- %06o,%06o", mem_addr, mem_write_data[0:17], mem_write_data[18:35]);
+`endif
+	       ram[mem_addr] <= mem_write_data;
+//	      write_ack <= 1;
+	       rw_done <= 0;
+	    end else begin
+	       saved_addr <= mem_addr;
+	       saved_write_data <= mem_write_data;
+	       write_ip <= 1;
+	       wait_count <= wait_time - 1;
+	    end // else: !if(wait_time == 0)
+	 end
       end
    end
    

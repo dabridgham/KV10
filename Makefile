@@ -1,17 +1,21 @@
-ICOPTS = -DSIM -Wall -Wno-implicit-dimensions
+ICOPTS = -DSIM -Wall -Wno-implicit-dimensions -g2012
 SIMOPTS = -N
-INCLUDES =  alu.vh constants.vh disasm.vh functions.vh io.vh opcodes.vh decode.vh
+INCLUDES =  alu.vh constants.vh disasm.vh functions.vh io.vh opcodes.vh
+LINTOPTS = --lint-only -Wno-LITENDIAN -DLINT
 
 ALL: alu.check apr.check sram.check mem-sram.check mem.check pag.check cache.check
 
-apr.check: apr.v alu.v decode.v barrel.v $(INCLUDES)
+ver:
+	verilator $(LINTOPTS) apr.v barrel.v
+
+apr.check: apr.v alu.v barrel.v $(INCLUDES)
 	iverilog -tnull $(ICOPTS) apr.v alu.v decode.v barrel.v
 alu.check: alu.v alu.vh barrel.v
 	iverilog -tnull $(ICOPTS) alu.v barrel.v
 pag.check: pag.v $(INCLUDES)
 
-tb-apr.vvp: Makefile tb-apr.v apr.v alu.v decode.v barrel.v mem.v $(INCLUDES)
-	iverilog $(ICOPTS) -o tb-apr.vvp tb-apr.v apr.v alu.v decode.v barrel.v mem.v
+tb-apr.vvp: Makefile kv10.hex tb-apr.v apr.v alu.v barrel.v mem.v decode.v $(INCLUDES)
+	iverilog $(ICOPTS) -o tb-apr.vvp tb-apr.v apr.v alu.v barrel.v mem.v decode.v
 
 tb-alu.vvp: tb-alu.v alu.v barrel.v alu.vh
 	iverilog -o tb-alu.vvp tb-alu.v alu.v barrel.v
@@ -21,6 +25,9 @@ tb-alu.lxt: tb-alu.vvp
 
 test.alu: tb-alu.lxt
 	./tb-alu.vvp
+
+kv10.hex: kv10.asm kv10.def
+	uas kv10.def kv10.asm kv10.hex kv10.lst
 
 save:
 	cp -a Makefile *.v *.vh saved

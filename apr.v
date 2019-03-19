@@ -36,7 +36,7 @@ module apr
 `include "io.vh"
 `include "opcodes.vh"
 `include "decode.vh"
-
+   
    //
    // Data Paths
    //
@@ -96,7 +96,7 @@ module apr
    // write these registers under control of the micro-machine
    reg 		      Alow_load, Areg_load, Mreg_load,
 		      OpA_load, IX_load, Y_load, BP_load,
-		      PC_load, PC_next, PC_skip;
+		      PC_load;
    always @(posedge clk) begin
       if (Alow_load) Alow <= ALUresultlow;
       
@@ -108,10 +108,6 @@ module apr
       if (Mreg_load) Mreg <= write_data;
       if (PC_load)
 	PC <= RIGHT(write_data);
-      else if (PC_next)
-	PC <= PC + 1;
-      else if (PC_skip)
-	PC <= PC + 2;
       if (OpA_load) OpA <= { instOP(write_data), instA(write_data) };
       if (IX_load)
 	IX <= { instI(write_data), instX(write_data) };
@@ -120,83 +116,58 @@ module apr
    end
 
    // A-leg mux to the ALU
-   reg [0:3] 	      Asel;	// set correct size !!!
+   wire [0:3] 	      Asel;	// set correct size !!!
    reg [`WORD] 	      Amux;
-   localparam
-     Asel_one = 0,
-     Asel_minusone = 1,
-     Asel_Areg = 2,
-     Asel_Mreg = 3,
-     Asel_PC = 4,
-     Asel_AC = 5,
-     Asel_E = 6,
-     Asel_BPmask = 7;
+   wire [`ADDR]       PC_next = PC + 1;
+   wire [`ADDR]       PC_skip = PC + 2;
    always @(*)
+     // numbers here must match those in kv10.def
      case (Asel)
-       Asel_one: Amux = `ONE;
-       Asel_minusone: Amux = `MINUSONE;
-       Asel_Areg: Amux = Areg;
-       Asel_Mreg: Amux = Mreg;
-       Asel_PC: Amux = { PSW, PC };
-       Asel_AC: Amux = AC;
-       Asel_E: Amux = { `HALFSIZE'd0, E };
-       Asel_BPmask: Amux = bp_mask(BP_S);
+       0: Amux = `ONE;
+       1: Amux = `MINUSONE;
+       2: Amux = Areg;
+       3: Amux = Mreg;
+       4: Amux = { PSW, PC };
+       5: Amux = AC;
+       6: Amux = { `HALFSIZE'd0, E };
+       7: Amux = bp_mask(BP_S);
+       8: Amux = `WORDSIZE'o254000_001000; // jrst 1000
+//       9: Amux = PIvector;
+       10: Amux = `ZERO;
+`ifndef LINT
+       // this makes a loop that never happens in practice but verilator has no way to know that
+       // so remove it for lint runs.  Need to fix this some better way !!!
+       11: Amux = {`WORDSIZE{Malu[0]}}; // sign-extend Malu
+`endif
+       12: Amux = { PSW, PC_next };
+       13: Amux = { PSW, PC_skip };
+       14: Amux = { RIGHT(AC), LEFT(AC) };
        default: Amux = AC;
      endcase // case (Asel)
 
    // M-leg mux to the ALU
-   reg [0:3] 	      Msel;	// set correct size !!!
+   wire [0:3] 	      Msel;	// set correct size !!!
    reg [`WORD] 	      Mmux;
-   wire [`HWORD]      extP = { 12'b0, BP_P };
-   wire [`HWORD]      extPneg = -extP;
-   localparam
-     Msel_AC = 0,
-     Msel_E = 1,
-     Msel_Mreg = 2,
-     Msel_BP_P = 3,
-     Msel_BP_Pneg = 4;
+   wire [`HWORD]      extP = { 12'b0, BP_P }; // byte position
+   wire [`HWORD]      extPneg = -extP;	      // for shifting bytes to the right
    always @(*)
+     // numbers here must match those in kv10.def
      case (Msel)
-       Msel_AC: Mmux = AC;
-       Msel_E: Mmux = { `HALFZERO, E };
-       Msel_Mreg: Mmux = Mreg;
-       Msel_BP_P: Mmux = { `HALFZERO, 12'b0, BP_P };
-       Msel_BP_Pneg: Mmux = { `HALFZERO, extPneg };
+       0: Mmux = AC;
+       1: Mmux = { `HALFZERO, E };
+       2: Mmux = Mreg;
+       3: Mmux = { `HALFZERO, 12'b0, BP_P };
+       4: Mmux = { `HALFZERO, extPneg };
+       5: Mmux = read_data;
        default: Mmux = AC;
      endcase // case (Msel)
 
-   // Optionally swap the halfwords on any of the legs to or from the ALU
-   wire 	      Aswap, Mswap, Cswap; // driven from instruction decode
-   reg 		      Mswap_ue;
-   wire [`WORD]       Aalu = Aswap ? { RIGHT(Amux), LEFT(Amux) } : Amux;
-   wire [`WORD]       Malu = Mswap || Mswap_ue ? { RIGHT(Mmux), LEFT(Mmux) } : Mmux;
-   wire [`WORD]       Calu = Cswap ? { RIGHT(ALUresult), LEFT(ALUresult) } : ALUresult;
-
-   // Select either A or A+1 for double word operations
-   reg 		      ACnext;
-   wire [0:3] 	      ACsel = ACnext ? A + 1 : A;
-   
-   // Memory Address mux
-   reg [0:2] 	      ADDRsel;	// set correct size !!!
-   localparam
-     ADDRsel_X = 0,
-     ADDRsel_E = 1,
-     ADDRsel_M = 2,
-     ADDRsel_PC = 3,
-     ADDRsel_PIVector = 4,
-     ADDRsel_IO = 5;
-   always @(*)
-     case (ADDRsel)
-       ADDRsel_X: mem_addr = { 14'b0, X };
-       ADDRsel_E: mem_addr = E;
-       ADDRsel_M: mem_addr = RIGHT(Malu);
-       ADDRsel_PC: mem_addr = PC;
-//       ADDRsel_PIVector: mem_addr = PIVector;
-       ADDRsel_IO: mem_addr = io_dev;
-     endcase // case (ADDRsel)
-   
+   // Select either A or A+1 for double word operations or X for index calculations
+   wire 	      ACnext, ACindex; // driven from the micro-instruction
+   wire [0:3] 	      ACsel = ACindex ? X : (ACnext ? A + 1 : A);
+      
    // some extra state to help with implementing multiply and divide
-   wire 	      mul_shift_set = NEGATIVE(Malu) & Alow[35];
+   wire 	      mul_shift_set = NEGATIVE(Mmux) & Alow[35];
    reg 		      mul_shift_bit;
    wire 	      mul_shift_ctl = mul_shift_bit | mul_shift_set;
    reg [0:5] 	      mul_count;
@@ -210,7 +181,8 @@ module apr
 	mul_count <= div_start ? -36 : -35;
 	mul_done <= 0;
 	div_first <= 1;
-     end else if (mul_step) begin
+//     end else if (mul_step) begin
+     end else begin
 	if (mul_shift_set)
 	  mul_shift_bit <= 1;
 	{mul_done, mul_count } <= mul_count + 1;
@@ -225,41 +197,24 @@ module apr
    wire 	      ALUcarry1;
    wire 	      ALUoverflow;
    wire 	      ALUzero;
-   alu alu(ALUcommand, Alow, Aalu, Malu, mul_shift_ctl, NEGATIVE(AC), ALUresultlow, ALUresult, 
+   wire 	      Mswap;
+   wire [`WORD]       Malu = Mswap ? { RIGHT(Mmux), LEFT(Mmux) } : Mmux;
+   alu alu(ALUcommand, Alow, Amux, Malu, mul_shift_ctl, NEGATIVE(AC), ALUresultlow, ALUresult, 
      ALUcarry0, ALUcarry1, ALUoverflow, ALUzero);
+   // rename the output of the ALU
+   wire [`WORD]       write_data = ALUresult;
+   // Send the output of the ALU to the write data lines for the memory
+   assign mem_write_data = write_data;
+   // Pull the memory address off the A input to the ALU
+   assign mem_addr = RIGHT(Amux);
 
-   // C-mux on the output of the ALU
-   reg [`WORD] 	      write_data;
-   reg [0:2] 	      Csel;
-   localparam
-     Csel_ALUresult = 0,
-     Csel_start_addr = 1,
-     Csel_read_data = 2,
-     Csel_io_data = 3;
-   always @(*)
-     case (Csel)
-       Csel_ALUresult: write_data = Calu;
-       Csel_start_addr: write_data = `WORDSIZE'o01000;
-       Csel_read_data: write_data = read_data;
-       Csel_io_data: write_data = read_data; // not yet implemented !!!
-       default: write_data = X;
-     endcase // case (Csel)
-   assign mem_write_data = write_data; // send it to the memory too
-
-   // Mux for Memory, ACs, and internal IO devices
+   // Mux for Memory and ACs
+   wire 	      mem_read, mem_write;
    reg [`WORD] 	      read_data;
    reg 		      read_ack, write_ack;
    reg 		      read, write;
-   reg [`WORD] 	      apr_io_read = 0;
    always @(*)
-     if (ADDRsel == ADDRsel_IO) begin
-	read_data = apr_io_read;
-	read_ack = io_read;
-	AC_mem_write = 0;
-	mem_mem_write = 0;
-	mem_mem_read = 0;
-	write_ack = io_write;
-     end else if (isAC(mem_addr)) begin
+     if (isAC(mem_addr)) begin
 	read_data = AC_mem;
 	read_ack = mem_read;
 	AC_mem_write = mem_write;
@@ -277,7 +232,7 @@ module apr
 
    // Compute a skip or jump condition looking at the ALU output.  This signal only makes
    // sense when the ALU is performing a subtraction.
-   wire [0:2] condition_code;	// driven by the instruction decode ROM
+   reg [0:2] condition_code;	// driven by the instruction decode ROM
    reg 	     jump_condition;
    always @(*)
      case (condition_code) // synopsys full_case parallel_case
@@ -308,25 +263,37 @@ module apr
    // Processor Status Word
    //
    reg overflow, carry0, carry1, floating_overflow;
+   reg saved_overflow, saved_carry0, saved_carry1;
    reg first_part_done, user, userIO, floating_underflow, no_divide;
-   reg clear_carry0, clear_carry1, clear_overflow, set_overflow, clear_floating_overflow;
+   reg set_flags, save_flags, clear_flags, set_overflow;
    reg clear_first_part_done, set_first_part_done, set_no_divide;
-   reg Flags_load, PSW_reset, PSW_load;
+   reg PSW_load;
    wire [`HWORD] PSW = { overflow, carry0, carry1, floating_overflow,
 			 first_part_done, user, userIO, 4'b0,
 			 floating_underflow, no_divide, 5'b0 };
    always @(posedge clk) begin
-      if (Flags_load) begin
-	 if (ALUoverflow) overflow <= 1;
-	 if (ALUcarry0) carry0 <= 1;
-	 if (ALUcarry1) carry1 <= 1;
+      // this is a set of latches on the ALU flags to save them for later
+      if (save_flags) begin
+	 saved_overflow <= ALUoverflow;
+	 saved_carry0 <= ALUcarry0;
+	 saved_carry1 <= ALUcarry1;
       end
 
-      if (clear_overflow) overflow <= 0;
+      if (set_flags) begin
+	 if ((saved_overflow) || (save_flags && ALUoverflow)) overflow <= 1;
+	 if ((saved_carry0) || (save_flags && ALUcarry0)) carry0 <= 1;
+	 if ((saved_carry1) || (save_flags && ALUcarry1)) carry1 <= 1;
+      end
+
       if (set_overflow) overflow <= 1;
-      if (clear_carry0) carry0 <= 0;
-      if (clear_carry1) carry1 <= 0;
-      if (clear_floating_overflow) floating_overflow <= 0;
+
+      if (clear_flags) begin
+	 if (inst[9]) overflow <= 0;
+	 if (inst[10]) carry0 <= 0;
+	 if (inst[11]) carry1 <= 0;
+	 if (inst[12]) floating_overflow <= 0;
+      end
+      
       if (clear_first_part_done) first_part_done <= 0;
       if (set_first_part_done) first_part_done <= 1;
       if (set_no_divide) no_divide <= 1;
@@ -342,68 +309,272 @@ module apr
 	 floating_underflow <= Mreg[11];
 	 no_divide <= Mreg[12];
       end
-
-      if (PSW_reset) begin
-	 overflow <= 0;
-	 carry0 <= 0;
-	 carry1 <= 0;
-	 floating_overflow <= 0;
-	 first_part_done <= 0;
-	 user <= 0;
-	 userIO <= 0;
-	 floating_underflow <= 0;
-	 no_divide <= 0;
-      end
    end
 
    // need to save the ALUoverflow flag for JFFO
    reg JFFO_overflow, overflow_load;
    always @(posedge clk)
      if (overflow_load)
-       JFFO_overflow = ALUoverflow;
+       JFFO_overflow <= ALUoverflow;
    
+
+   //
+   // Micro-Controller
+   //
+
+   // the micro-instruction and its breakout
+   reg [63:0] uROM [0:2047];	// microcode ROM
+   reg [63:0] uinst;		// set the width once I'm done !!!
+
+   wire       uhalt = uinst[63]; // halt the micro-engine
+   assign div_start = uinst[62];
+//   assign mul_step = uinst[61];
+   assign mul_start = uinst[60];
+   assign set_no_divide = uinst[59];
+   assign set_first_part_done = uinst[58];
+   assign clear_first_part_done = uinst[57];
+   assign set_overflow = uinst[56];
+   assign clear_flags = uinst[55];
+   assign overflow_load = uinst[54]; // is this needed? !!!
+   assign set_flags = uinst[53];
+
+   assign PSW_load = uinst[51];
+   assign ACnext = uinst[50];
+   assign ACindex = uinst[49];
+   assign BP_load = uinst[48];
+   assign Y_load = uinst[47];
+   assign IX_load = uinst[46];
+   assign OpA_load = uinst[45];
+//   assign PC_skip = uinst[44];
+//   assign PC_next = uinst[43];
+   assign PC_load = uinst[42];
+   assign Mreg_load = uinst[41];
+   assign Areg_load = uinst[40];
+   assign Alow_load = uinst[39];
+   assign AC_write = uinst[38];
+   
+   assign io_write = uinst[37];
+   assign io_read = uinst[36];
+   assign mem_write = uinst[35];
+   assign mem_read = uinst[34];
+
+//   assign Cswap = uinst[33];
+   assign Mswap = uinst[32];
+//   assign Aswap = uinst[31];
+   assign save_flags = uinst[30];
+
+   assign ALUcommand = uinst[29:24];
+   assign Asel = uinst[23:20];
+   assign Msel = uinst[19:16];
+   wire [4:0] ubranch_code = uinst[15:11];
+   wire [10:0] unext = uinst[10:0]; // the next instruction location
+
+   reg [10:0] uaddr, uprev;	// current and previous micro-addresses, kept for debugging
+   reg [10:0] ubranch;		// gets ORd with unext to get the next micro-address
+
+   initial $readmemh("kv10.hex", uROM);
+
+   // the core of the microsequencer is trvial
+   always @(posedge clk) begin
+      if (reset) begin
+	 uprev <= 'x;
+	 uaddr <= 0;
+	 uinst <= uROM[0];
+      end
+`ifdef SIM
+      // what do I do if we hit a uhalt when not in the simulator?  !!!
+      else if (uhalt) 
+	begin
+	   $display(" HALT!!!");
+	   $display("uEngine halt @%o from %o", uaddr, uprev);
+	   $display("Cycles: %0d  Instructions: %0d   Cycles/inst: %f",
+		    cycles, instruction_count, $itor(cycles)/$itor(instruction_count));
+	   $display("carry0: %b  carry1: %b  overflow: %b  floating overflow: %b",
+		    carry0, carry1, overflow, floating_overflow);
+	   print_ac();
+	   $finish_and_return(1);
+	end
+`endif
+      else begin
+	 uprev <= uaddr;
+	 uaddr <= unext | ubranch;
+	 uinst <= uROM[unext | ubranch];
+//`define UDISASM 1
+`ifdef UDISASM
+	 $display("%o", uaddr);
+`endif
+      end
+   end // always @ (posedge clk)
+
+   // branching is where much of the magic happens in the micro-engine
+   always @(*) begin
+      ubranch = 0;		// default all the bits to 0
+      
+      // these numbers need to match up with the numbers in kv10.def
+      case (ubranch_code)
+	// no branch
+	0: ubranch = 0;
+
+	// mem read - a 4-way branch for reading from memory
+	1: case (1'b1)
+//	     interrupt:		ubranch[1:0] = 3;	// implement interrupts !!!
+	     mem_page_fail:	ubranch[1:0] = 2;
+	     read_ack:		ubranch[1:0] = 1;
+	     default:		ubranch[1:0] = 0;
+	   endcase // case (1'b1)
+
+	// mem write - a 3-way branch for writing to memory.  interrupts are only recognized
+	// when reading from memory.
+	2: case (1'b1)
+	     mem_page_fail:	ubranch[1:0] = 2;
+	     write_ack:		ubranch[1:0] = 1;
+	     default:		ubranch[1:0] = 0;
+	   endcase
+
+	// IX - a 3-way branch on index and indirect calculating the Effective Address.  this
+	// comes from write_data because the check happens before inst gets written
+	3: case (1'b1)
+	     instX(write_data) != 0: ubranch[1:0] = 0;
+	     instI(write_data): ubranch[1:0] = 1;
+	     default: ubranch[1:0] = 2;
+	   endcase
+
+	// Indirect - If the Effective Address calculation included an Index register, we need
+	// to then check if there's also an Indirect.  This happens after inst is written so
+	// take the Indirect bit from there.
+	4: ubranch[0] = Indirect;
+
+	// Dispatch - This comes from the instruction decode.  By default it's just the
+	// instruction opcode but it also handles the Effective Address calculation,
+	// instructions that need to read the value at E first, and then a few special cases to
+	// optimze certain instructions.  Also, I/O instructions are handled specially.
+	5: if (ReadE)
+	  ubranch[8:0] = 9'o720;
+	else
+	  ubranch[8:0] = dispatch;
+
+	// condition skip or jump comparisons
+	6: ubranch[0] = Comp0 ? jump_condition_0 : jump_condition;
+
+	// Write Self check - if AC != 0
+	7: ubranch[0] = (A != 0);
+
+	// Test - Bitwise compare on the /inputs/ to the ALU.  For the TEST instructions.
+	8: ubranch[0] = ((Amux & Malu) != 0);
+
+	// JFCL - if any of the flags are about to be cleared
+	9: ubranch[0] = (({overflow, carry0, carry1, floating_overflow} & inst[9:12]) != 0);
+
+	// MUL - break out the different Multiply or Divide instructions
+	// 0: IMUL/IDIV	1: IMULI/IDIVI	2: IMULM/IDIVM	3: IMULB/IDIVB
+	// 5: MUL/DIV	6: MULI/DIVI	7: MULM/DIVM	7: MULB/DIVB
+	10: ubranch[2:0] = inst[6:8];
+
+	// OVR - check ALUoverflow, used in DIV and JFFO
+	11: ubranch[0] = ALUoverflow;
+
+	// Byte - Branch on which of four byte instructions
+	// 0: ILDB	1: LBD		2: IDPB		3: DPB
+	12: ubranch[1:0] = inst[7:8];
+
+	// First Part Done
+	13: ubranch[0] = first_part_done;
+
+	// BLT terminates when the word we just wrote went into location E
+	14: ubranch[0] = (RIGHT(AC) == E);
+
+	default: ubranch = 0;
+      endcase // case (ubranch_code)
+   end
+
+`ifdef SIM
+`include "disasm.vh"
+
+   reg [`WORD] 	 cycles;
+   reg [`WORD] 	 instruction_count;
+   reg [`ADDR] 	 inst_addr;
+
+   always @(posedge clk) begin
+      cycles <= cycles+1;
+
+      // When the Op is loaded, remember the instruction address for the disassembler
+      if (OpA_load) begin
+	 inst_addr <= mem_addr;
+	 instruction_count <= instruction_count + 1;
+      end
+      
+      if (reset) begin
+	 instruction_count <= 0;
+	 cycles <= 0;
+	 carry0 <= 0;
+	 carry1 <= 0;
+	 overflow <= 0;
+	 floating_overflow <= 0;
+      end
+
+      if (OpA_load) begin
+	 // this is a horrible hack but it's really handy for running a bunch of
+	 // tests and DaveC's tests all loop back to 001000 !!!
+	 if ((PC == `ADDRSIZE'o1000) && (instruction_count != 0)) begin
+	    $display("Cycles: %0d  Instructions: %0d   Cycles/inst: %f",
+		     cycles, instruction_count, $itor(cycles)/$itor(instruction_count));
+	    $finish_and_return(0);
+	 end
+
+	 // disassembler
+	 $display("%6o: %6o,%6o %s", mem_addr, write_data[0:17], write_data[18:35], disasm(write_data));
+      end // if (OpA_load)
+
+`ifdef NOTDEF
+      if (ubranch_code == 4) begin	// dispatch
+	 if (instX(inst) || instI(inst))
+	   $write(" @%6o", E);
+	 if (ReadE)
+	   $write(" [%6o,%6o]", Mreg[0:17], Mreg[18:35]);
+	 if (WriteAC || (WriteSelf && (A != 0)) || WriteE)
+	   $write(" %6o,%6o -->", write_data[0:17], write_data[18:35]);
+	 if (WriteAC || (WriteSelf && (A != 0)))
+	   $write(" AC%o", A);
+	 if (WriteE)
+	   $write(" [%6o]", E);
+	 $display("");		// newline
+      end // if (ubranch_code == 4)
+`endif //  `ifdef NOTDEF
+   end
+
+`endif
+   
+
 
    //
    // Instruction Decode ROM
    //
 
-   wire [0:4] dispatch;		// main instruction branch in the state machine
-   wire [`aluCMD] ALUinst;	// the ALU operation needed by this instruction
-   wire 	  ReadE,	// the instruction reads the value from E
- 		  ReadAC,	// the instruction puts AC on the Mmux
- 		  ReadOne,	// select 1 on the Amux
- 		  ReadMinusOne, // select -1 on the Amux
- 		  ReadMonA,	// select Mreg on the Amux
- 		  SetFlags,	// the instruction sets the processor flags
- 		  WriteE,	// the instruction writes to E
- 		  WriteAC,	// the instruction writes to AC
- 		  WriteSelf,	// the instruction writes to AC if AC != 0
- 		  Comp0,	// use jump_condition_0 instead of jump_condition
- 		  jump;		// jump instead of skip (if the condition_code hits)
+   reg ReadE;			// the instruction reads the value from E
+   wire dReadE;			// from the decode ROM
+   wire Comp0;			// use jump_condition_0 instead of jump_condition
+   wire [0:8] dispatch;		// main instruction branch in the micro-code
    wire [`ADDR] io_dev;		// the I/O device
-   decode decode(.inst(inst),
+   wire [`WORD] dinst = OpA_load ? write_data : inst;
+   decode decode(.inst(dinst),
 		 .user(user),
 		 .userIO(userIO),
 		 .dispatch(dispatch),
-		 .ALUinst(ALUinst),
- 		 .ReadE(ReadE),
- 		 .ReadAC(ReadAC),
- 		 .ReadOne(ReadOne),
- 		 .ReadMinusOne(ReadMinusOne),
- 		 .ReadMonA(ReadMonA),
-		 .Aswap(Aswap),
-		 .Mswap(Mswap),
-		 .Cswap(Cswap),
- 		 .SetFlags(SetFlags),
- 		 .WriteE(WriteE),
- 		 .WriteAC(WriteAC),
- 		 .WriteSelf(WriteSelf),
+ 		 .ReadE(dReadE),
 		 .condition_code(condition_code),
  		 .Comp0(Comp0),
- 		 .jump(jump),
  		 .io_dev(io_dev));
+   always @(posedge clk) begin
+      // After we read E, clear the flag so we can dispatch again and not read E again
+      if (ubranch_code == 5)	// dispatch
+	ReadE <= 0;
+      // grab ReadE from the decode ROM but into a register that we can clear once we read E
+      else if (OpA_load)
+	ReadE <= dReadE;
+   end
 
 
+`ifdef NOTDEF
 
    //
    // State Machine
@@ -584,7 +755,7 @@ module apr
       ACnext = 0;
 
       PSW_load = 0;
-      PSW_reset = 0;
+      eset = 0;
       Flags_load = 0;
       overflow_load = 0;
       clear_overflow = 0;
@@ -969,7 +1140,7 @@ module apr
 
 		      dIDIV:
 			begin
-			   // Alow <- AC
+			   // A,Alow <- |AC| << 1
 			   Asel = Asel_AC;
 			   ALUcommand = `aluDIV_MAG36;
 			   Csel = Csel_ALUresult;
@@ -1551,7 +1722,7 @@ module apr
 
 	endcase // case (1'b1)
    end
-      
+`endif      
 
 
 
