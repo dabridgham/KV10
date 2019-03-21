@@ -42,18 +42,19 @@
 # middle of the uword, but it was felt that this price was worth paying
 # for the benefit of being able to do a consistency check.
 
-33
+31
 
+# not using the halt bit anymore but keep it around so the
+# microassembler is happy that we're using the entire microword.
 uhalt		none	63	1	bit	none
-udivstart	none	62	1	bit	none
-#umulstep	none	61	1	bit	none
+
 umulstart	none	60	1	bit	none
 usetnodiv	none	59	1	bit	none
 usetfpd		none	58	1	bit	none
 uclrfpd		none	57	1	bit	none
 usetovf		none	56	1	bit	none
 uclrflags	none	55	1	bit	none
-uloadovf	none	54	1	bit	none
+
 usetflags	none	53	1	bit	none
 
 uloadpsw	none	51	1	bit	none
@@ -67,7 +68,7 @@ uloadopa	none	45	1	bit	none
 upcload		none	42	1	bit	none
 uloadm		none	41	1	bit	none
 uloada		none	40	1	bit	none
-uloadalow	none	39	1	bit	none
+uloadb			none	39	1	bit	none
 uwriteac	none	38	1	bit	none
 uwriteio	none	37	1	bit	none
 ureadio		none	36	1	bit	none
@@ -101,19 +102,14 @@ literal		none	0	11	lit	none
 # used with some, but not all, values of that field). 'yes' and 'no' are
 # the acceptable values for this token.
 
-108
+110
 
-halt		uhalt		1	no
-
-divstart	udivstart	1	no
-#mulstep 	umulstep	1	no
 mulstart	umulstart	1	no
 setNODIV	usetnodiv	1	no
 setFPD		usetfpd		1	no
 clrFPD		uclrfpd		1	no
 setOVF		usetovf		1	no
 clrFLAGS	uclrflags	1	no
-loadOVF 	uloadovf	1	no
 setFLAGS	usetflags	1	no
 saveFLAGS	usaveflags	1	no
 
@@ -127,7 +123,7 @@ loadOPA		uloadopa	1	no
 loadPC		upcload 	1	no
 loadM		uloadm		1	no
 loadA		uloada		1	no
-loadALOW	uloadalow	1	no
+loadB		uloadb		1	no
 writeAC		uwriteac	1	no
 writeIO		uwriteio	1	no
 readIO 		ureadio		1	no
@@ -136,32 +132,36 @@ readMEM		ureadmem	1	no
 
 swapM	uswapm	1	no
 
-aONE	asel	0	no
-aMONE	asel	1	no
-aA	asel	2	no
-aM	asel	3	no
-aPC	asel	4	no
-aAC	asel	5	no
-aE	asel	6	no
-aBPMASK	asel	7	no
-aINIT	asel	8	no
-aPI	asel	9	no
-aZERO	asel	10	no
-aSXT	asel	11	no
-aPCnext	asel	12	no
-aPCskip	asel	13	no
-aSWAP	asel	14	no
+aZERO	asel	0	no
+aONE	asel	1	no
+aMONE	asel	2	no
+aINIT	asel	3	no
+aSXT	asel	4	no
+aVECTOR	asel	5	no
+aA	asel	6	no
+aPC	asel	7	no
+aPCnext	asel	8	no
+aPCskip	asel	9	no
+aAC	asel	10	no
+aSWAP	asel	11	no
+aBPMASK	asel	12	no
+aM	asel	13	no
+aE	asel	14	no
 
-mAC	msel	0	no
-mE	msel	1	no
-mM	msel	2	no
-mBPP	msel	3	no
-mBPPNEG	msel	4	no
+mM	msel	0	no
+mAC	msel	1	no
+mBPP	msel	2	no
+mBPPNEG	msel	3	no
+mE	msel	4	no
 mMEM	msel	5	no
 mIO	msel	6	no
+mINST	msel	7	no
+
+# this is a hack.  For the moment, alucmd=0 isn't used.
+halt		alucmd	0	no
 
 aluIBP		alucmd	1	no
-aluSETAlow	alucmd	2	no
+aluSETB		alucmd	2	no
 aluAOB		alucmd	3	no
 aluSOB		alucmd	4	no
 aluMULADD	alucmd	5	no
@@ -211,14 +211,17 @@ brIX		ubranch	3	yes
 brI		ubranch	4	yes
 brDISPATCH	ubranch	5	yes
 brCOMP		ubranch	6	yes
-brSELF		ubranch	7	yes
-brTEST		ubranch	8	yes
-brJFCL		ubranch	9	yes
-brMUL		ubranch	10	yes
-brOVR		ubranch 11	yes
-brBPDISP	ubranch	12	yes
-brFPD		ubranch 13	yes
-brBLTDONE	ubranch	14	yes
+brCOMP0		ubranch	7	yes
+brSELF		ubranch	8	yes
+brTEST		ubranch	9	yes
+brJFCL		ubranch	10	yes
+brMUL		ubranch	11	yes
+brOVR		ubranch 12	yes
+brBPDISP	ubranch	13	yes
+brFPD		ubranch 14	yes
+brBLTDONE	ubranch	15	yes
+brIOREAD	ubranch	16	yes
+brIOWRITE	ubranch	17	yes
 
 .
 

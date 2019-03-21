@@ -9,14 +9,14 @@
 
 module decode
   (
-   input [`WORD] 	inst, // instruction
-   input 		user, // user/exec mode
-   input 		userIO, // userIO is enabled
-   output reg [8:0] 	dispatch, // main instruction branch in the state machine
-   output reg 		ReadE, // the instruction reads the value from E
-   output reg [0:2] 	condition_code, // jump or skip condition
-   output reg 		Comp0, // use jump_condition_0 instead of jump_condition
-   output [`ADDR] 	io_dev	// the I/O device
+   input [`WORD]    inst,	    // instruction
+   input 	    user,	    // user/exec mode
+   input 	    userIO,	    // userIO is enabled
+   output reg [8:0] dispatch,	    // main instruction branch in the state machine
+   output reg 	    ReadE,	    // the instruction reads the value from E
+   output reg [0:2] condition_code, // jump or skip condition
+   output [`DEVICE] io_dev,	    // the I/O device
+   output reg 	    io_cond	    // if the I/O is for the Device Conditions
    );
 
 `include "opcodes.vh"
@@ -27,18 +27,14 @@ module decode
      no = 1'b0,
      yes = 1'b1;
 
-   // build up an address for I/O devices from the device field in the
-   // instruction and whether it's a data or conditions operation
-   reg 			io_conditions;
-   assign io_dev = { 9'b0, instIODEV(inst), 1'b0, io_conditions };
+   assign io_dev = instIODEV(inst); // Send the I/O Device number back
 
    always @(*) begin
       // defaults
       dispatch = instOP(inst);
       ReadE = no;
       condition_code = skip_never;
-      Comp0 = no;
-      io_conditions = no;
+      io_cond = no;
 
       // verilator lint_off CASEX
       // Turn off this verilator flag and fix this !!!
@@ -66,6 +62,12 @@ module decode
 	FMP, FMPL, FMPM, FMPB, FMPR, FMPRL, FMPRM, FMPRB,
 	FDV, FDVL, FDVM, FDVB, FDVR, FDVRL, FDVRM, FDVRB:
 	  ;
+
+	IBP: ReadE = yes;	// Increment Byte Pointer
+	ILDB: ReadE = yes;	// Increment and Load Byte
+	LDB: ReadE = yes;	// Load Byte
+	IDPB: ReadE = yes;	// Increment and Deposit Byte
+	DPB: ReadE = yes;	// Deposit Byte
 
 	//
 	// Full Word MOVE instructions
@@ -115,26 +117,15 @@ module decode
 	DIVM: ReadE = yes;
 	DIVB: ReadE = yes;
 	
-	//
 	// Shifts and Rotates
-	//
-
-	ASH: ;
-	ROT: ;
-	LSH: ;
-	JFFO: ;
-	ASHC: ;
-	ROTC: ;
-	LSHC: ;
-	CIRC: ;
+	ASH, ROT, LSH, JFFO, ASHC, ROTC, LSHC, CIRC:
+	  ;
 
 	EXCH: ReadE = yes;	// Exchange, AC <-> C(E)
 	BLT: ;			// Block Transfer
 	
-	AOBJP:			// Add One to Both halves of AC, Jump if Positive
-	  { condition_code, Comp0 } = { skipge, yes };
-	AOBJN:			// Add One to Both halves of AC, Jump if Negative
-	  { condition_code, Comp0 } = { skipl, yes };
+	AOBJP: condition_code = skipge; // Add One to Both halves of AC, Jump if Positive
+	AOBJN: condition_code = skipl; // Add One to Both halves of AC, Jump if Negative
 
 	JRST:			// Jump and Restory Flags
 	  // Special optimization for JRST
@@ -191,144 +182,86 @@ module decode
 	CAMG: { ReadE, condition_code } = { yes, skipg };
 
 	// Compare AC with 0
-	JUMP: { condition_code, Comp0 } = { skip_never, yes };
-	JUMPL: { condition_code, Comp0 } = { skipl, yes };
-	JUMPE: { condition_code, Comp0 } = { skipe, yes };
-	JUMPLE: { condition_code, Comp0 } = { skiple, yes };
-	JUMPA: { condition_code, Comp0 } = { skipa, yes };
-	JUMPGE: { condition_code, Comp0 } = { skipge, yes };
-	JUMPN: { condition_code, Comp0 } = { skipn, yes };
-	JUMPG: { condition_code, Comp0 } = { skipg, yes };
+	JUMP: condition_code = skip_never;
+	JUMPL: condition_code = skipl;
+	JUMPE: condition_code = skipe;
+	JUMPLE: condition_code = skiple;
+	JUMPA: condition_code = skipa;
+	JUMPGE: condition_code = skipge;
+	JUMPN: condition_code = skipn;
+	JUMPG: condition_code = skipg;
 
 	// Add one to AC and jump
-	AOJ: { condition_code, Comp0 } = { skip_never, yes };
-	AOJL: { condition_code, Comp0 } = { skipl, yes };
-	AOJE: { condition_code, Comp0 } = { skipe, yes };
-	AOJLE: { condition_code, Comp0 } = { skiple, yes };
-	AOJA: { condition_code, Comp0 } = { skipa, yes };
-	AOJGE: { condition_code, Comp0 } = { skipge, yes };
-	AOJN: { condition_code, Comp0 } = { skipn, yes };
-	AOJG: { condition_code, Comp0 } = { skipg, yes };
+	AOJ: condition_code = skip_never;
+	AOJL: condition_code = skipl;
+	AOJE: condition_code = skipe;
+	AOJLE: condition_code = skiple;
+	AOJA: condition_code = skipa;
+	AOJGE: condition_code = skipge;
+	AOJN: condition_code = skipn;
+	AOJG: condition_code = skipg;
 
 	// Add one to Memory and skip
-	AOS: { ReadE, condition_code, Comp0 } = { yes, skip_never, yes };
-	AOSL: { ReadE, condition_code, Comp0 } = { yes, skipl, yes };
-	AOSE: { ReadE, condition_code, Comp0 } = { yes, skipe, yes };
-	AOSLE: { ReadE, condition_code, Comp0 } = { yes, skiple, yes };
-	AOSA: { ReadE, condition_code, Comp0 } = { yes, skipa, yes };
-	AOSGE: { ReadE, condition_code, Comp0 } = { yes, skipge, yes };
-	AOSN: { ReadE, condition_code, Comp0 } = { yes, skipn, yes };
-	AOSG: { ReadE, condition_code, Comp0 } = { yes, skipg, yes };
+	AOS: { ReadE, condition_code } = { yes, skip_never };
+	AOSL: { ReadE, condition_code } = { yes, skipl };
+	AOSE: { ReadE, condition_code } = { yes, skipe };
+	AOSLE: { ReadE, condition_code } = { yes, skiple };
+	AOSA: { ReadE, condition_code } = { yes, skipa };
+	AOSGE: { ReadE, condition_code } = { yes, skipge };
+	AOSN: { ReadE, condition_code } = { yes, skipn };
+	AOSG: { ReadE, condition_code } = { yes, skipg };
 
 	// Subtract One from AC and jump
-	SOJ: { condition_code, Comp0 } = { skip_never, yes };
-	SOJL: { condition_code, Comp0 } = { skipl, yes };
-	SOJE: { condition_code, Comp0 } = { skipe, yes };
-	SOJLE: { condition_code, Comp0 } = { skiple, yes };
-	SOJA: { condition_code, Comp0 } = { skipa, yes };
-	SOJGE: { condition_code, Comp0 } = { skipge, yes };
-	SOJN: { condition_code, Comp0 } = { skipn, yes };
-	SOJG: { condition_code, Comp0 } = { skipg, yes };
+	SOJ: condition_code = skip_never;
+	SOJL: condition_code = skipl;
+	SOJE: condition_code = skipe;
+	SOJLE: condition_code = skiple;
+	SOJA: condition_code = skipa;
+	SOJGE: condition_code = skipge;
+	SOJN: condition_code = skipn;
+	SOJG: condition_code = skipg;
 
 	// Subtract One from Memory and skip
-	SOS: { ReadE, condition_code, Comp0 } = { yes, skip_never, yes };
-	SOSL: { ReadE, condition_code, Comp0 } = { yes, skipl, yes };
-	SOSE: { ReadE, condition_code, Comp0 } = { yes, skipe, yes };
-	SOSLE: { ReadE, condition_code, Comp0 } = { yes, skiple, yes };
-	SOSA: { ReadE, condition_code, Comp0 } = { yes, skipa, yes };
-	SOSGE: { ReadE, condition_code, Comp0 } = { yes, skipge, yes };
-	SOSN: { ReadE, condition_code, Comp0 } = { yes, skipn, yes };
-	SOSG: { ReadE, condition_code, Comp0 } = { yes, skipg, yes };
+	SOS: { ReadE, condition_code } = { yes, skip_never };
+	SOSL: { ReadE, condition_code } = { yes, skipl };
+	SOSE: { ReadE, condition_code } = { yes, skipe };
+	SOSLE: { ReadE, condition_code } = { yes, skiple };
+	SOSA: { ReadE, condition_code } = { yes, skipa };
+	SOSGE: { ReadE, condition_code } = { yes, skipge };
+	SOSN: { ReadE, condition_code } = { yes, skipn };
+	SOSG: { ReadE, condition_code } = { yes, skipg };
 	
 	// Logical Operations
 	// AC <- AC <op> 0,E
-	SETZI: ;
-	ANDI: ;
-	ANDCAI: ;
-	SETMI: ;
-	ANDCMI: ;
-	SETAI: ;
-	XORI: ;
-	ORI: ;
-	ANDCBI: ;
-	EQVI: ;
-	SETCAI: ;
-	ORCAI: ;
-	SETCMI: ;
-	ORCMI: ;
-	ORCBI: ;
-	SETOI: ;
+	SETZI, ANDI, ANDCAI, SETMI, ANDCMI, SETAI, XORI, ORI, ANDCBI, 
+	  EQVI, SETCAI, ORCAI, SETCMI, ORCMI, ORCBI, SETOI:
+	    ;
    
 	// AC <- AC <op> C(E)
 	// SETZ, for instance, doesn't really need to Read E.  Optimize !!!
-	SETZ: ReadE = yes;
-	AND: ReadE = yes;
-	ANDCA: ReadE = yes;
-	SETM: ReadE = yes;
-	ANDCM: ReadE = yes;
-	SETA: ReadE = yes;
-	XOR: ReadE = yes;
-	OR: ReadE = yes;
-	ANDCB: ReadE = yes;
-	EQV: ReadE = yes;
-	SETCA: ReadE = yes;
-	ORCA: ReadE = yes;
-	SETCM: ReadE = yes;
-	ORCM: ReadE = yes;
-	ORCB: ReadE = yes;
-	SETO: ReadE = yes;
+	SETZ, AND, ANDCA, SETM, ANDCM, SETA, XOR, OR,
+	  ANDCB, EQV, SETCA, ORCA, SETCM, ORCM, ORCB, SETO: 
+	    ReadE = yes;
    
 	// C(E) <- AC <op> C(E)
-	SETZM: ReadE = yes;
-	ANDM: ReadE = yes;
-	ANDCAM: ReadE = yes;
-	SETMM: ReadE = yes;
-	ANDCMM: ReadE = yes;
-	SETAM: ReadE = yes;
-	XORM: ReadE = yes;
-	ORM: ReadE = yes;
-	ANDCBM: ReadE = yes;
-	EQVM: ReadE = yes;
-	SETCAM: ReadE = yes;
-	ORCAM: ReadE = yes;
-	SETCMM: ReadE = yes;
-	ORCMM: ReadE = yes;
-	ORCBM: ReadE = yes;
-	SETOM: ReadE = yes;
+	SETZM, ANDM, ANDCAM, SETMM, ANDCMM, SETAM, XORM, ORM, 
+	  ANDCBM, EQVM, SETCAM, ORCAM, SETCMM, ORCMM, ORCBM, SETOM: 
+	    ReadE = yes;
    
 	// C(E) and AC <- AC <op> C(E)
-	SETZB: ReadE = yes;
-	ANDB: ReadE = yes;
-	ANDCAB: ReadE = yes;
-	SETMB: ReadE = yes;
-	ANDCMB: ReadE = yes;
-	SETAB: ReadE = yes;
-	XORB: ReadE = yes;
-	ORB: ReadE = yes;
-	ANDCBB: ReadE = yes;
-	EQVB: ReadE = yes;
-	SETCAB: ReadE = yes;
-	ORCAB: ReadE = yes;
-	SETCMB: ReadE = yes;
-	ORCMB: ReadE = yes;
-	ORCBB: ReadE = yes;
-	SETOB: ReadE = yes;
-
-	IBP: ReadE = yes;	// Increment Byte Pointer
-	LDB: ReadE = yes;	// Load Byte
-	ILDB: ReadE = yes;	// Increment and Load Byte
-	DPB: ReadE = yes;	// Deposit Byte
-	IDPB: ReadE = yes;	// Increment and Deposit Byte
+	SETZB, ANDB, ANDCAB, SETMB, ANDCMB, SETAB, XORB, ORB, 
+	  ANDCBB, EQVB, SETCAB, ORCAB, SETCMB, ORCMB, ORCBB, SETOB: 
+	    ReadE = yes;
 
 	// Compare Memory with 0 and skip
-	SKIP: { ReadE, condition_code, Comp0 } = { yes, skip_never, yes };
-	SKIPL: { ReadE, condition_code, Comp0 } = { yes, skipl, yes };
-	SKIPE: { ReadE, condition_code, Comp0 } = { yes, skipe, yes };
-	SKIPLE: { ReadE, condition_code, Comp0 } = { yes, skiple, yes };
-	SKIPA: { ReadE, condition_code, Comp0 } = { yes, skipa, yes };
-	SKIPGE: { ReadE, condition_code, Comp0 } = { yes, skipge, yes };
-	SKIPN: { ReadE, condition_code, Comp0 } = { yes, skipn, yes };
-	SKIPG: { ReadE, condition_code, Comp0 } = { yes, skipg, yes };
+	SKIP: { ReadE, condition_code } = { yes, skip_never };
+	SKIPL: { ReadE, condition_code } = { yes, skipl };
+	SKIPE: { ReadE, condition_code } = { yes, skipe };
+	SKIPLE: { ReadE, condition_code } = { yes, skiple };
+	SKIPA: { ReadE, condition_code } = { yes, skipa };
+	SKIPGE: { ReadE, condition_code } = { yes, skipge };
+	SKIPN: { ReadE, condition_code } = { yes, skipn };
+	SKIPG: { ReadE, condition_code } = { yes, skipg };
 	
 	// Half-word moves - Halfword[LR][LR][- Zeros Ones Extend][- Immediate Memory Self]
 	//   Mode     Suffix    Source     Destination
@@ -336,79 +269,45 @@ module decode
 	//  Immediate   I        0,E           AC
 	//  Memory      M         AC           (E)
 	//  Self        S        (E)           (E) and AC if AC nonzero
-`define HMOVE(alu, aswap, mswap, cswap, readac, readm, reade, writeac, writes, writee) { ALUinst, Aswap, Mswap, Cswap, ReadAC, ReadMonA, ReadE, WriteAC, WriteSelf, WriteE } = { alu, aswap, mswap, cswap, readac, readm, reade, writeac, writes, writee }
-
-	HLL: ReadE = yes;
+	HLL, HLLM, HLLS: ReadE = yes;
 	HLLI: ReadE = no;
-	HLLM: ReadE = yes;
-	HLLS: ReadE = yes;
-	HRL: ReadE = yes;
+	HRL, HRLM, HRLS: ReadE = yes;
 	HRLI: ReadE = no;
-	HRLM: ReadE = yes;
-	HRLS: ReadE = yes;
 		      
-	HLLZ: ReadE = yes;
+	HLLZ, HLLZM, HLLZS: ReadE = yes;
 	HLLZI: ReadE = no;
-	HLLZM: ReadE = yes;
-	HLLZS: ReadE = yes;
-	HRLZ: ReadE = yes;
+	HRLZ, HRLZM, HRLZS: ReadE = yes;
 	HRLZI: ReadE = no;
-	HRLZM: ReadE = yes;
-	HRLZS: ReadE = yes;
 	
-	HLLO: ReadE = yes;
+	HLLO, HLLOM, HLLOS: ReadE = yes;
 	HLLOI: ReadE = no;
-	HLLOM: ReadE = yes;
-	HLLOS: ReadE = yes;
-	HRLO: ReadE = yes;
+	HRLO, HRLOM, HRLOS: ReadE = yes;
 	HRLOI: ReadE = no;
-	HRLOM: ReadE = yes;
-	HRLOS: ReadE = yes;
 	
-	HLLE: ReadE = yes;
+	HLLE, HLLEM, HLLES: ReadE = yes;
 	HLLEI: ReadE = no;
-	HLLEM: ReadE = yes;
-	HLLES: ReadE = yes;
-	HRLE: ReadE = yes;
+	HRLE, HRLEM, HRLES: ReadE = yes;
 	HRLEI: ReadE = no;
-	HRLEM: ReadE = yes;
-	HRLES: ReadE = yes;
 
-	HRR: ReadE = yes;
+	HRR, HRRM, HRRS: ReadE = yes;
 	HRRI: ReadE = no;
-	HRRM: ReadE = yes;
-	HRRS: ReadE = yes;
-	HLR: ReadE = yes;
+	HLR, HLRM, HLRS: ReadE = yes;
 	HLRI: ReadE = no;
-	HLRM: ReadE = yes;
-	HLRS: ReadE = yes;
 		      
-	HRRZ: ReadE = yes;
+	HRRZ, HRRZM, HRRZS: ReadE = yes;
 	HRRZI: ReadE = no;
-	HRRZM: ReadE = yes;
-	HRRZS: ReadE = yes;
-	HLRZ: ReadE = yes;
+	HLRZ, HLRZM, HLRZS: ReadE = yes;
 	HLRZI: ReadE = no;
-	HLRZM: ReadE = yes;
-	HLRZS: ReadE = yes;
 	
-	HRRO: ReadE = yes;
+	HRRO, HRROM, HRROS: ReadE = yes;
 	HRROI: ReadE = no;
-	HRROM: ReadE = yes;
-	HRROS: ReadE = yes;
-	HLRO: ReadE = yes;
+	HLRO, HLROM, HLROS: ReadE = yes;
 	HLROI: ReadE = no;
-	HLROM: ReadE = yes;
-	HLROS: ReadE = yes;
 	
-	HRRE: ReadE = yes;
+	HRRE, HRREM, HRRES: ReadE = yes;
 	HRREI: ReadE = no;
-	HRREM: ReadE = yes;
-	HRRES: ReadE = yes;
-	HLRE: ReadE = yes;
+	HLRE, HLREM, HLRES: ReadE = yes;
 	HLREI: ReadE = no;
-	HLREM: ReadE = yes;
-	HLRES: ReadE = yes;
 
 	// Logical Testing and Modification (Bit Testing)
 	// R - mask right half of AC with 0,E
@@ -425,78 +324,14 @@ module decode
 	// E - skip if all masked bits equal 0
 	// A - always skip
 	// N - skip if any masked bit is 1
-
-	TRN: ReadE = no;
-	TLN: ReadE = no;
-	TRNE: ReadE = no;
-	TLNE: ReadE = no;
-	TRNA: ReadE = no;
-	TLNA: ReadE = no;
-	TRNN: ReadE = no;
-	TLNN: ReadE = no;
-
-	TDN: ReadE = yes;
-	TSN: ReadE = yes;
-	TDNE: ReadE = yes;
-	TSNE: ReadE = yes;
-	TDNA: ReadE = yes;
-	TSNA: ReadE = yes;
-	TDNN: ReadE = yes;
-	TSNN: ReadE = yes;
-
-	TRZ: ReadE = no;
-	TLZ: ReadE = no;
-	TRZE: ReadE = no;
-	TLZE: ReadE = no;
-	TRZA: ReadE = no;
-	TLZA: ReadE = no;
-	TRZN: ReadE = no;
-	TLZN: ReadE = no;
-
-	TDZ: ReadE = yes;
-	TSZ: ReadE = yes;
-	TDZE: ReadE = yes;
-	TSZE: ReadE = yes;
-	TDZA: ReadE = yes;
-	TSZA: ReadE = yes;
-	TDZN: ReadE = yes;
-	TSZN: ReadE = yes;
-
-	TRC: ReadE = no;
-	TLC: ReadE = no;
-	TRCE: ReadE = no;
-	TLCE: ReadE = no;
-	TRCA: ReadE = no;
-	TLCA: ReadE = no;
-	TRCN: ReadE = no;
-	TLCN: ReadE = no;
-
-	TDC: ReadE = yes;
-	TSC: ReadE = yes;
-	TDCE: ReadE = yes;
-	TSCE: ReadE = yes;
-	TDCA: ReadE = yes;
-	TSCA: ReadE = yes;
-	TDCN: ReadE = yes;
-	TSCN: ReadE = yes;
-
-	TRO: ReadE = no;
-	TLO: ReadE = no;
-	TROE: ReadE = no;
-	TLOE: ReadE = no;
-	TROA: ReadE = no;
-	TLOA: ReadE = no;
-	TRON: ReadE = no;
-	TLON: ReadE = no;
-
-	TDO: ReadE = yes;
-	TSO: ReadE = yes;
-	TDOE: ReadE = yes;
-	TSOE: ReadE = yes;
-	TDOA: ReadE = yes;
-	TSOA: ReadE = yes;
-	TDON: ReadE = yes;
-	TSON: ReadE = yes;
+	TRN, TLN, TRNE, TLNE, TRNA, TLNA, TRNN, TLNN: ReadE = no;
+	TDN, TSN, TDNE, TSNE, TDNA, TSNA, TDNN, TSNN: ReadE = yes;
+	TRZ, TLZ, TRZE, TLZE, TRZA, TLZA, TRZN, TLZN: ReadE = no;
+	TDZ, TSZ, TDZE, TSZE, TDZA, TSZA, TDZN, TSZN: ReadE = yes;
+	TRC, TLC, TRCE, TLCE, TRCA, TLCA, TRCN, TLCN: ReadE = no;
+	TDC, TSC, TDCE, TSCE, TDCA, TSCA, TDCN, TSCN: ReadE = yes;
+	TRO, TLO, TROE, TLOE, TROA, TLOA, TRON, TLON: ReadE = no;
+	TDO, TSO, TDOE, TSOE, TDOA, TSOA, TDON, TSON: ReadE = yes;
 	
 	IO_INSTRUCTION:
 	  if (user && !userIO)
@@ -506,15 +341,16 @@ module decode
 	      BLKI: dispatch = 'o700;  // C(E) <- I/O Data and AOB AC skip if not 0
 	      DATAI: dispatch = 'o701; // C(E) <- I/O Data
 	      BLKO: dispatch = 'o702;  // I/O Data <- C(E) and AOB AC skip if not 0
-	      DATAO: { ReadE, dispatch } = { yes, 9'o703 }; // I/O Data <- C(E)
-	      CONO: { dispatch, io_conditions } = { 9'o704, yes }; // I/O Cond <- 0,E
+	      DATAO: { dispatch, ReadE } = { 9'o703, yes }; // I/O Data <- C(E)
+
+	      CONO: { dispatch, io_cond } = { 9'o704, yes }; // I/O Cond <- 0,E
 		
 	      CONI:		// C(E) <- I/O Cond
-		{ dispatch, condition_code, io_conditions } = { 9'o705, skip_never, yes };
+		{ dispatch, condition_code, io_cond } = { 9'o705, skip_never, yes };
 	      CONSZ:		// E & Cond, Skip if 0
-		{ dispatch, condition_code, Comp0, io_conditions } = { 9'o706, skipe, yes, yes };
+		{ dispatch, condition_code, io_cond } = { 9'o706, skipe, yes };
 	      CONSO:		// E | Cond, Skip if not 0
-		{ dispatch, condition_code, Comp0, io_conditions } = { 9'o707, skipn, yes, yes };
+		{ dispatch, condition_code, io_cond } = { 9'o707, skipn, yes };
 	    endcase // case (IOOP(inst))
 
       endcase

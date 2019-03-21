@@ -101,3 +101,8 @@
  
  o JSR and PUSHJ (and JSP?) could benefit by putting PSW,PCnext on Mmux
  
+ o Make B be the low word to M instead of A
+ 
+ o Write diagnostic to test interrupt processing: second instruction, skip instructions,
+   nested interrupts
+   
