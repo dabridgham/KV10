@@ -327,29 +327,30 @@ any instruction makes sense there and most haven't been tested.  There are three
 classes of instruction that have different effects when used as an interrupt instruction.
 
 \begin{description}
-  \item[jumps] Instructions which cause a jump will clear the CM flag (put the processor
-    in exec mode) and jump to the destination address as per the instruction.  \code{JSR}
-    is the typical example of this and the most commonly used interrupt instruction.  The
-    interrupt service routine is expected to clear the condition causing the interrupt (if
-    needed) and dismiss the interrupt with \code{JEN}.
-  \item[skips] For instructions that may skip, if they do not skip then they execute the
-    instruction at 41+2*N (where N is the PI channel number) as an interrupt instruction.
-    If \emph{that} instruction may skip, the action of the APR is undefined.  If the
-    instruction does skip, then the interrupt is dismissed and the interrupted program
-    continues.
+  \item[JSR, JSP, PUSHJ, JSA, or JRST] These instructions will clear the CM flag (put the
+    processor in exec mode) and jump to the destination address as per the instruction.
+    \code{JSR} is the typical example of this and the most commonly used interrupt
+    instruction.  The interrupt service routine is expected to clear the condition causing
+    the interrupt (if needed) and dismiss the interrupt with \code{JEN}.\footnote{The KI10
+      allows MUUO instructions as interrupt instructions.  This might work but has not
+      been tested.}
 
-    This is here for the \code{BLKO} and \code{BLKI} instructions.  Since implementing
-    this requires specific code to be added for each instruction that skips, I may or may
-    not add the capability to other instructions.
-  \item[everything else] Instructions that normally proceed to the next instruction take
-    their action then dismiss the interrupt and return to the interrupted program.  This
-    differs from the KA10 but is like the KI10 and later models.
+  \item[AOSx, SKIPx, SOSx, CONSx, or BLKx] If the skip condition is satisfied, then the
+    APR dismisses the interrupt and returns to the interrupted program.  If the skip
+    condition is not satisfied, the instruction in the second interrupt location for the
+    channel is executed as an interrupt instruction.
+
+  \item[everything else] All other instructions take their action then dismiss the
+    interrupt and return to the interrupted program.  This differs from the KA10 but is
+    like the KI10 and later models.  Differing from the KI10, jump and skip instructions
+    (other than those listed above) do not jump or skip but simply return to the
+    interrupted instruction.
 \end{description}
 
 \subsection{Unassigned Codes}
 
-\marginpar{\raggedright \tiny The unassigned codes are 100-107, 114-117, 123, and (if
-  \code{CIRC} is not included) 247.}The KA10 handles unassigned codes much like MUUOs
+\marginpar{\raggedright \tiny The unassigned codes are 100-107, 114-117, 123, 247 (if
+  \code{CIRC} is not included), and 257.}The KA10 handles unassigned codes much like MUUOs
 except they go through locations 60 and 61 rather than 40 and 41.  The KX10 sends both
 MUUOs and unassigned codes through locations 40 and 41.  The KV10 may do it either way and
 is controlled through the \texttt{UAC} option in \texttt{constants.vh}.  Defining

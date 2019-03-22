@@ -9,14 +9,16 @@
 
 module decode
   (
-   input [`WORD]    inst,	    // instruction
-   input 	    user,	    // user/exec mode
-   input 	    userIO,	    // userIO is enabled
-   output reg [8:0] dispatch,	    // main instruction branch in the state machine
-   output reg 	    ReadE,	    // the instruction reads the value from E
+   input [`WORD]    inst, // instruction
+   input 	    user, // user/exec mode
+   input 	    userIO, // userIO is enabled
+   output reg [8:0] dispatch, // main instruction branch in the state machine
+   output reg 	    ReadE, // the instruction reads the value from E
    output reg [0:2] condition_code, // jump or skip condition
-   output [`DEVICE] io_dev,	    // the I/O device
-   output reg 	    io_cond	    // if the I/O is for the Device Conditions
+   output [`DEVICE] io_dev, // the I/O device
+   output reg 	    io_cond, // if the I/O is for the Device Conditions
+   output reg 	    int_jump, // interrupt instruction is a jump
+   output reg 	    int_skip //  interrupt instruction is a skip
    );
 
 `include "opcodes.vh"
@@ -35,6 +37,8 @@ module decode
       ReadE = no;
       condition_code = skip_never;
       io_cond = no;
+      int_jump = no;
+      int_skip = no;
 
       // verilator lint_off CASEX
       // Turn off this verilator flag and fix this !!!
@@ -128,12 +132,13 @@ module decode
 	AOBJN: condition_code = skipl; // Add One to Both halves of AC, Jump if Negative
 
 	JRST:			// Jump and Restory Flags
-	  // Special optimization for JRST
-	  case (1'b1)
-	    inst[10]: dispatch = 9'o730; // JRST 4 (HALT)
-	    inst[11]: dispatch = 9'o731; // JRST 10 (JRSTF)
-	    default: ;			 // JRST
-	  endcase
+	  // Special optimization for JRST.
+	  if (!(user & ~userIO & (inst[9] | inst[10]))) begin
+	     int_jump = yes;
+	     dispatch = 9'o720 | { 5'b0, inst[9:12] };
+	  end
+	// if the JRST is illegal, either halt or dismiss interrupt when in user mode, then the
+	// dispatch goes to the normal spot in the dispatch table where it's treated as an MUUO
 
 	JFCL: ;			// Jump on Flag and Clear
 
@@ -142,14 +147,14 @@ module decode
 	
 	MAP: ;
 
-	PUSHJ: ;		// Push down and Jump: AC <- aob(AC) then C(AC) <- PSW,PC
+	PUSHJ: int_jump = yes;	// Push down and Jump: AC <- aob(AC) then C(AC) <- PSW,PC
 	PUSH: ReadE = yes;	// AC <- aob(AC) then C(AC) <- C(E)
 	POP: ;			// C(E) <- C(AC) then AC <- sob(AC)
 	POPJ: ;			// Pop up and Jump: 
 
-	JSR: ;			// Jump to Subroutine: C(E) <- PSW,PC  PC <- E+1
-	JSP: ;			// Jump and Save PC: AC <- PSW,PC  PC <- E
-	JSA: ;			// Jump and Save AC: C(E) <- AC  AC <- E,PC  PC <- E+1
+	JSR: int_jump = yes;	// Jump to Subroutine: C(E) <- PSW,PC  PC <- E+1
+	JSP: int_jump = yes;	// Jump and Save PC: AC <- PSW,PC  PC <- E
+	JSA: int_jump = yes;	// Jump and Save AC: C(E) <- AC  AC <- E,PC  PC <- E+1
 	JRA: ;			// Jump and Restore AC: AC <- C(left(AC))  PC <- E
 
 	ADD:  ReadE = yes;	// AC <- AC + C(E)
@@ -202,14 +207,14 @@ module decode
 	AOJG: condition_code = skipg;
 
 	// Add one to Memory and skip
-	AOS: { ReadE, condition_code } = { yes, skip_never };
-	AOSL: { ReadE, condition_code } = { yes, skipl };
-	AOSE: { ReadE, condition_code } = { yes, skipe };
-	AOSLE: { ReadE, condition_code } = { yes, skiple };
-	AOSA: { ReadE, condition_code } = { yes, skipa };
-	AOSGE: { ReadE, condition_code } = { yes, skipge };
-	AOSN: { ReadE, condition_code } = { yes, skipn };
-	AOSG: { ReadE, condition_code } = { yes, skipg };
+	AOS: { ReadE, condition_code, int_skip } = { yes, skip_never, yes };
+	AOSL: { ReadE, condition_code, int_skip } = { yes, skipl, yes };
+	AOSE: { ReadE, condition_code, int_skip } = { yes, skipe, yes };
+	AOSLE: { ReadE, condition_code, int_skip } = { yes, skiple, yes };
+	AOSA: { ReadE, condition_code, int_skip } = { yes, skipa, yes };
+	AOSGE: { ReadE, condition_code, int_skip } = { yes, skipge, yes };
+	AOSN: { ReadE, condition_code, int_skip } = { yes, skipn, yes };
+	AOSG: { ReadE, condition_code, int_skip } = { yes, skipg, yes };
 
 	// Subtract One from AC and jump
 	SOJ: condition_code = skip_never;
@@ -222,14 +227,14 @@ module decode
 	SOJG: condition_code = skipg;
 
 	// Subtract One from Memory and skip
-	SOS: { ReadE, condition_code } = { yes, skip_never };
-	SOSL: { ReadE, condition_code } = { yes, skipl };
-	SOSE: { ReadE, condition_code } = { yes, skipe };
-	SOSLE: { ReadE, condition_code } = { yes, skiple };
-	SOSA: { ReadE, condition_code } = { yes, skipa };
-	SOSGE: { ReadE, condition_code } = { yes, skipge };
-	SOSN: { ReadE, condition_code } = { yes, skipn };
-	SOSG: { ReadE, condition_code } = { yes, skipg };
+	SOS: { ReadE, condition_code, int_skip } = { yes, skip_never, yes };
+	SOSL: { ReadE, condition_code, int_skip } = { yes, skipl, yes };
+	SOSE: { ReadE, condition_code, int_skip } = { yes, skipe, yes };
+	SOSLE: { ReadE, condition_code, int_skip } = { yes, skiple, yes };
+	SOSA: { ReadE, condition_code, int_skip } = { yes, skipa, yes };
+	SOSGE: { ReadE, condition_code, int_skip } = { yes, skipge, yes };
+	SOSN: { ReadE, condition_code, int_skip } = { yes, skipn, yes };
+	SOSG: { ReadE, condition_code, int_skip } = { yes, skipg, yes };
 	
 	// Logical Operations
 	// AC <- AC <op> 0,E
@@ -254,14 +259,14 @@ module decode
 	    ReadE = yes;
 
 	// Compare Memory with 0 and skip
-	SKIP: { ReadE, condition_code } = { yes, skip_never };
-	SKIPL: { ReadE, condition_code } = { yes, skipl };
-	SKIPE: { ReadE, condition_code } = { yes, skipe };
-	SKIPLE: { ReadE, condition_code } = { yes, skiple };
-	SKIPA: { ReadE, condition_code } = { yes, skipa };
-	SKIPGE: { ReadE, condition_code } = { yes, skipge };
-	SKIPN: { ReadE, condition_code } = { yes, skipn };
-	SKIPG: { ReadE, condition_code } = { yes, skipg };
+	SKIP: { ReadE, condition_code, int_skip } = { yes, skip_never, yes };
+	SKIPL: { ReadE, condition_code, int_skip } = { yes, skipl, yes };
+	SKIPE: { ReadE, condition_code, int_skip } = { yes, skipe, yes };
+	SKIPLE: { ReadE, condition_code, int_skip } = { yes, skiple, yes };
+	SKIPA: { ReadE, condition_code, int_skip } = { yes, skipa, yes };
+	SKIPGE: { ReadE, condition_code, int_skip } = { yes, skipge, yes };
+	SKIPN: { ReadE, condition_code, int_skip } = { yes, skipn, yes };
+	SKIPG: { ReadE, condition_code, int_skip } = { yes, skipg, yes };
 	
 	// Half-word moves - Halfword[LR][LR][- Zeros Ones Extend][- Immediate Memory Self]
 	//   Mode     Suffix    Source     Destination
@@ -338,9 +343,9 @@ module decode
 	    dispatch = 'o710;
 	  else
 	    case (instIOOP(inst))
-	      BLKI: dispatch = 'o700;  // C(E) <- I/O Data and AOB AC skip if not 0
+	      BLKI: {dispatch, int_skip } = { 9'o700, yes }; // C(E) <- I/O Data and AOB AC skip if not 0
 	      DATAI: dispatch = 'o701; // C(E) <- I/O Data
-	      BLKO: dispatch = 'o702;  // I/O Data <- C(E) and AOB AC skip if not 0
+	      BLKO: { dispatch, int_skip } = { 9'o702, yes }; // I/O Data <- C(E) and AOB AC skip if not 0
 	      DATAO: { dispatch, ReadE } = { 9'o703, yes }; // I/O Data <- C(E)
 
 	      CONO: { dispatch, io_cond } = { 9'o704, yes }; // I/O Cond <- 0,E
@@ -348,9 +353,9 @@ module decode
 	      CONI:		// C(E) <- I/O Cond
 		{ dispatch, condition_code, io_cond } = { 9'o705, skip_never, yes };
 	      CONSZ:		// E & Cond, Skip if 0
-		{ dispatch, condition_code, io_cond } = { 9'o706, skipe, yes };
+		{ dispatch, condition_code, io_cond, int_skip } = { 9'o706, skipe, yes, yes };
 	      CONSO:		// E | Cond, Skip if not 0
-		{ dispatch, condition_code, io_cond } = { 9'o707, skipn, yes };
+		{ dispatch, condition_code, io_cond, int_skip } = { 9'o707, skipn, yes, yes };
 	    endcase // case (IOOP(inst))
 
       endcase

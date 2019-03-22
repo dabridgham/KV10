@@ -39,7 +39,7 @@ module apr
    
 
    //
-   // Interrupt Logic
+   // Interrupt Logic and PI Device
    //
 
    reg 		      pi_ge;	// Global Enable
@@ -48,41 +48,251 @@ module apr
    reg [1:7] 	      pi_ip;	// PI In-Progress
    reg [1:7] 	      pi_trap;	// trap interrupts from the APR
    reg [1:7] 	      pi_error;	// error interrupts from the APR
-   reg [1:7] 	      pi_second; // execute the second interrupt instruction
    wire [1:7] 	      pi_hr = pi_trap | pi_error | io_pi_req; // hardware request
-   wire [1:7] 	      pi_ir = pi_sr | (pi_le & pi_hr); // interrupt request - software requests
+   wire [1:7] 	      pi_rq = pi_sr | (pi_le & pi_hr); // interrupt request - software requests
  						       // happen even if the level enable is off
    reg [`ADDR] 	      pi_vector; // Vector Address for the current interrupt level
+   reg 		      interrupt_instruction; // set while executing an interrupt instruction
+   wire 	      start_interrupt;
+   reg 		      dismiss_interrupt, clr_ii, clr_user;
+   wire 	      udisint;		 // dismiss interrupt from the uengine
+   wire		      interrupt_request; // signals when there's an interrupt request higher
+					 // than the current level in-progress
+   wire [`WORD] pi_status = { 11'b0, pi_sr, 3'b0, pi_ip, pi_ge, pi_le }; // PI status word for CONI
    
-	 
+   
    task RESET_PI;
       pi_ge <= 0;
       pi_le <= 0;
       pi_sr <= 0;
       pi_ip <= 0;
-      pi_trap <= 0;
-      pi_error <= 0;
-      pi_second <= 0;
+      interrupt_instruction <= 0;
    endtask
 
+   // Figure out if we need to begin interrupt processing
+   reg [1:7] pi_mask;		// mask of interrupts in-progress
+   always @(*)
+     case (1'b1)
+       pi_ip[1]: pi_mask = 7'o177;
+       pi_ip[2]: pi_mask = 7'o077;
+       pi_ip[3]: pi_mask = 7'o037;
+       pi_ip[4]: pi_mask = 7'o017;
+       pi_ip[5]: pi_mask = 7'o007;
+       pi_ip[6]: pi_mask = 7'o003;
+       pi_ip[7]: pi_mask = 7'o001;
+       default:  pi_mask = 7'o000;
+     endcase // case (1'b1)
+   assign interrupt_request = pi_ge && ((pi_rq & ~pi_mask) != 0);
+
+   // Set the PI Vector according to the current level of interrupt being requested
    typedef bit [`ADDR] addr;	// this typdef needs to move to a header file !!!
    task set_pi_vector;
       input integer level;
-      pi_vector = addr'('o40 + (2*level) + integer'(pi_second[level]));
+      pi_vector = addr'('o40 + (2*level) + integer'(pi_ip[level]));
    endtask
 
+   always @(*)
+     if (start_interrupt)
+       case (1'b1)
+	 pi_rq[1]: set_pi_vector(1);
+	 pi_rq[2]: set_pi_vector(2);
+	 pi_rq[3]: set_pi_vector(3);
+	 pi_rq[4]: set_pi_vector(4);
+	 pi_rq[5]: set_pi_vector(5);
+	 pi_rq[6]: set_pi_vector(6);
+	 pi_rq[7]: set_pi_vector(7);
+       endcase
+     else
+       // If we're not executing an interrupt instruction, default back to here for use
+       // executing UUOs.  If I want to separate out Unassigned Instructions, this is where that
+       // would go.  !!!
+       pi_vector = `ADDRSIZE'o040;
+
+   always @(posedge clk)
+     if (start_interrupt) begin
+	// To begin interrupt processing, execute the interrupt instruction and mark this PI
+	// level as In-Progress
+	interrupt_instruction <= 1;
+	case (1'b1)
+	  pi_rq[1]: pi_ip[1] <= 1;
+	  pi_rq[2]: pi_ip[2] <= 1;
+	  pi_rq[3]: pi_ip[3] <= 1;
+	  pi_rq[4]: pi_ip[4] <= 1;
+	  pi_rq[5]: pi_ip[5] <= 1;
+	  pi_rq[6]: pi_ip[6] <= 1;
+	  pi_rq[7]: pi_ip[7] <= 1;
+	endcase	  
+     end else if (clr_ii) begin
+	interrupt_instruction <= 0;
+     end else if (dismiss_interrupt || udisint) begin
+	case (1'b1)
+	  pi_ip[1]: pi_ip[1] <= 0;
+	  pi_ip[2]: pi_ip[2] <= 0;
+	  pi_ip[3]: pi_ip[3] <= 0;
+	  pi_ip[4]: pi_ip[4] <= 0;
+	  pi_ip[5]: pi_ip[5] <= 0;
+	  pi_ip[6]: pi_ip[6] <= 0;
+	  pi_ip[7]: pi_ip[7] <= 0;
+	endcase	  
+     end
+
+   // Modify various signals while we're executing an interrupt instruction
    always @(*) begin
-      case (1'b1)
-	pi_ir[1]: set_pi_vector(1);
-	pi_ir[2]: set_pi_vector(2);
-	pi_ir[3]: set_pi_vector(3);
-	pi_ir[4]: set_pi_vector(4);
-	pi_ir[5]: set_pi_vector(5);
-	pi_ir[6]: set_pi_vector(6);
-	pi_ir[7]: set_pi_vector(7);
-	default:  set_pi_vector(0); // used for UUOs !!!
-      endcase	
+      PC_load = uPC_load;
+      clr_ii = 0;
+      clr_user = 0;
+      dismiss_interrupt = 0;
+
+      if (interrupt_instruction) begin
+	 // most times an interrupt instruction doesn't load the PC
+	 PC_load = 0;
+
+	 if (uPC_load) begin
+	    clr_ii = 1;
+	    case (1'b1)
+	      // Instructions that are used to jump to an interrupt service routine
+	      int_jump:
+		begin
+		   PC_load = 1;
+		   clr_user = 1;	// switch to kernel mode for the ISR
+		end
+
+	      // Instructions that may skip.  If they skip, dismiss the interrupt and return to
+	      // previous processing, If they don't skip, execute the second interrupt instruction
+	      // in the vector.
+	      int_skip:
+		if (Asel == 8)	// next
+		  // go on to exectute the second instruction
+		  clr_ii = 0; // still an interrupt instruction
+		else		// skip
+		  dismiss_interrupt = 1;
+
+	      // All other instructions just dismiss the interrupt.
+	      default:
+		dismiss_interrupt = 1;
+	    endcase // case (1'b1)
+	 end
+      end
    end
+
+   //
+   // APR Device
+   //
+   
+   reg apr_ehe = 0,	     // error interrupt enable for the hard error flag
+       apr_ese = 0,	     // error interrupt enable for the soft error flag
+       apr_ee2 = 0,	     // error interrupt enable for the executive mode trap-2 flag
+       apr_ee1 = 0,	     // error interrupt enable for the executive mode trap-1 flag
+       apr_eu2 = 0,	     // error interrupt enable for the user mode trap-2 flag
+       apr_eu1 = 0,	     // error interrupt enable for the user mode trap-1 flag
+       apr_the = 0,	     // trap interrupt enable for the hard error flag
+       apr_tse = 0,	     // trap interrupt enable for the soft error flag
+       apr_te2 = 0,	     // trap interrupt enable for the executive mode trap-2 flag
+       apr_te1 = 0,	     // trap interrupt enable for the executive mode trap-1 flag
+       apr_tu2 = 0,	     // trap interrupt enable for the user mode trap-2 flag
+       apr_tu1 = 0,	     // trap interrupt enable for the user mode trap-1 flag
+       apr_fhe = 0,	     // the hard error flag
+       apr_fse = 0,	     // the soft error flag
+       apr_fe2 = 0,	     // the executive mode trap-2 flag
+       apr_fe1 = 0,	     // the executive mode trap-1 flag
+       apr_fu2 = 0,	     // the user mode trap-2 flag
+       apr_fu1 = 0,	     // the user mode trap-1 flag
+       apr_eir = 0,	     // indicates that an error interrupt is pending, even if the error
+			     // interrupt is not connected to the PI system
+       apr_tir = 0;	     // indicates that a trap interrupt is pending, even if the error
+			     // interrupt is not connected to the PI system
+   reg [0:2] apr_eia = 0;    // the PI assignment for the error interrupt. 0 means not connected
+   reg [0:2] apr_tia = 0;    // the PI assignment for the trap interrupt. 0 means not connected
+   wire [`WORD] apr_status = // APR status word for CONI
+		{ apr_ehe, apr_ese, apr_ee2, apr_ee1, apr_eu2, apr_eu1, apr_eia,
+		  apr_the, apr_tse, apr_te2, apr_te1, apr_tu2, apr_tu1,	apr_tia,	
+		  7'b0, apr_fhe, apr_fse, apr_fe2, apr_fe1, apr_fu2, apr_fu1, apr_eir, apr_tir, 3'b0 };
+
+   task reset_apr;
+      begin
+	 apr_ehe <= 0;
+	 apr_ese <= 0;
+	 apr_ee2 <= 0;
+	 apr_ee1 <= 0;
+	 apr_eu2 <= 0;
+	 apr_eu1 <= 0;
+	 apr_the <= 0;
+	 apr_tse <= 0;
+	 apr_te2 <= 0;
+	 apr_te1 <= 0;
+	 apr_tu2 <= 0;
+	 apr_tu1 <= 0;
+	 apr_fhe <= 0;
+	 apr_fse <= 0;
+	 apr_fe2 <= 0;
+	 apr_fe1 <= 0;
+	 apr_fu2 <= 0;
+	 apr_fu1 <= 0;
+//	 apr_eir <= 0;   // these are cleared as a side-effect of clearing other things
+//	 apr_tir <= 0;
+	 apr_eia <= 0;
+	 apr_tia <= 0;
+      end
+   endtask
+	 
+
+   // set error interrupt
+   always @(*) begin
+      pi_error = 0;
+      if ((apr_ehe && (apr_fhe || mem_nxm)) ||	     // notice NXM or page fail immediately.
+	  (apr_ese && (apr_fse || mem_page_fail)) || // the error flag will be set on the next
+						     // clock.
+	  (apr_ee2 && apr_fe2) ||
+	  (apr_ee1 && apr_fe1) ||
+	  (apr_eu2 && apr_fu2) ||
+	  (apr_eu1 && apr_fu1)) 
+	begin
+	   apr_eir = 1;
+	   if (apr_eia != 0)
+	     pi_error[apr_eia] = 1;
+	end else
+	  apr_eir = 0;
+   end
+
+   // set trap interrupt
+   always @(*) begin
+      pi_trap = 0;
+      if ((apr_the && (apr_fhe || mem_nxm)) ||	     // notice NXM or page fail immediately.
+	  (apr_tse && (apr_fse || mem_page_fail)) || // the error flag will be set on the next
+						     // clock
+	  (apr_te2 && apr_fe2) ||
+	  (apr_te1 && apr_fe1) ||
+	  (apr_tu2 && apr_fu2) ||
+	  (apr_tu1 && apr_fu1)) 
+	begin
+	   apr_tir = 1;
+	   if (apr_tia != 0)
+	     pi_trap[apr_tia] = 1;
+	end else
+	  apr_tir = 0;
+   end
+   
+
+`ifdef NOTDEF
+   task set_overflow;
+      begin
+	 overflow <= 1;
+	 if (user)
+	   apr_fu1 <= 1;
+	 else
+	   apr_fe1 <= 1;
+      end
+   endtask
+
+   task set_pushdown_overflow;
+      begin
+	 if (user)
+	   apr_fu2 <= 1;
+	 else
+	   apr_fe2 <= 1;
+      end
+   endtask
+`endif
 
 
    //
@@ -94,7 +304,7 @@ module apr
 
 
    // these all need to move to the module interface !!!
-   reg 		      ext_io_read_ack, ext_io_write_ack, ext_io_nxd;
+   reg 		      ext_io_read_ack, ext_io_write_ack, ext_io_nxd = 1;
    reg [`WORD] 	      ext_io_read_data;
 
    // Internal I/O Control Line Mux
@@ -105,7 +315,7 @@ module apr
       
       case ({io_dev, io_cond})
 	IO_DATA(APR): io_nxd = 1; // not yet implemented !!!
-	IO_COND(APR): io_nxd = 1; // not yet implemented !!!
+	IO_COND(APR): ;
 	IO_DATA(PI):  io_nxd = 1; // not yet implemented !!!
 	IO_COND(PI):  ;
 	default:
@@ -122,9 +332,9 @@ module apr
      if (io_read)
        case ({io_dev, io_cond})
 	 IO_DATA(APR): io_read_data <= 0;
-	 IO_COND(APR): io_read_data <= 0;
+	 IO_COND(APR): io_read_data <= apr_status;
 	 IO_DATA(PI): io_read_data <= 0;
-	 IO_COND(PI): io_read_data <= { 11'b0, pi_sr, 3'b0, pi_ip, pi_ge, pi_le };
+	 IO_COND(PI): io_read_data <= pi_status;
 	 default: 
 	   if (ext_io_read_ack)
 	     io_read_data <= ext_io_read_data;
@@ -140,7 +350,48 @@ module apr
 	     ;
 	   
 	   IO_COND(APR):
-	     ;
+	     begin
+		if (E[`APR_SSE]) apr_fse <= 1; // set/clear soft error
+		else if (E[`APR_CSE]) apr_fse <= 0;
+		
+		if (E[`APR_RIO]) ; // Does nothing now.  Probably should just poke BIO !!!
+
+		if (E[`APR_SF]) begin // set/clear flags
+		   if (E[`APR_MHE]) apr_fhe <= 1;
+		   if (E[`APR_MSE]) apr_fse <= 1;
+		   if (E[`APR_ME2]) apr_fe2 <= 1;
+		   if (E[`APR_ME1]) apr_fe1 <= 1;
+		   if (E[`APR_MU2]) apr_fu2 <= 1;
+		   if (E[`APR_MU1]) apr_fu1 <= 1;
+		end else if (E[`APR_CF]) begin
+		   if (E[`APR_MHE]) apr_fhe <= 0;
+		   if (E[`APR_MSE]) apr_fse <= 0;
+		   if (E[`APR_ME2]) apr_fe2 <= 0;
+		   if (E[`APR_ME1]) apr_fe1 <= 0;
+		   if (E[`APR_MU2]) apr_fu2 <= 0;
+		   if (E[`APR_MU1]) apr_fu1 <= 0;
+		end
+
+		if (E[`APR_LE]) begin // load error interrupt enables and PI assignment
+		   apr_ehe <= E[`APR_MHE];
+		   apr_ese <= E[`APR_MSE];
+		   apr_ee2 <= E[`APR_ME2];
+		   apr_ee1 <= E[`APR_ME1];
+		   apr_eu2 <= E[`APR_MU2];
+		   apr_eu1 <= E[`APR_MU1];
+		   apr_eia <= E[`APR_IA];
+		end
+
+		if (E[`APR_LT]) begin // load trap interrupt enables and PI assignment
+		   apr_the <= E[`APR_MHE];
+		   apr_tse <= E[`APR_MSE];
+		   apr_te2 <= E[`APR_ME2];
+		   apr_te1 <= E[`APR_ME1];
+		   apr_tu2 <= E[`APR_MU2];
+		   apr_tu1 <= E[`APR_MU1];
+		   apr_tia <= E[`APR_IA];
+		end
+	     end
 
 	   IO_DATA(PI):
 	     ;
@@ -236,7 +487,8 @@ module apr
    // write these registers under control of the micro-machine
    reg 		      Breg_load, Areg_load, Mreg_load,
 		      OpA_load, IX_load, Y_load, BP_load,
-		      PC_load;
+   		      PC_load;
+   wire 	      uPC_load;
    always @(posedge clk) begin
       if (Breg_load) Breg <= ALUresultlow;
       
@@ -268,16 +520,19 @@ module apr
        2: Amux = `MINUSONE;
        3: Amux = `WORDSIZE'o254000_001000; // jrst 1000
        4: Amux = {`WORDSIZE{Malu[0]}}; // sign-extend Malu
-//       5: Amux = PIvector;
+       5: Amux = { `HALFZERO, pi_vector };
        6: Amux = Areg;
        7: Amux = { PSW, PC };
-       8: Amux = { PSW, PC_next };
+       // This is just ugly.  JSR, JSP, PSA, and PUSHJ normally save the next PC.  However, when
+       // used as an interrupt instruction, they want to save the current PC.  Seems like there
+       // ought to be a more elegant way to get the right answer here.
+       8: Amux = { PSW, interrupt_instruction ? PC : PC_next };
        9: Amux = { PSW, PC_skip };
        10: Amux = AC;
        11: Amux = { RIGHT(AC), LEFT(AC) };
        12: Amux = bp_mask(BP_S);
        13: Amux = Mreg;
-       14: Amux = { `HALFSIZE'd0, E };
+       14: Amux = { `HALFZERO, E };
        default: Amux = AC;
      endcase // case (Asel)
 
@@ -404,6 +659,7 @@ module apr
    reg set_flags, save_flags, clear_flags, set_overflow;
    reg clear_first_part_done, set_first_part_done, set_no_divide;
    reg PSW_load;
+   wire set_user;
    wire [`HWORD] PSW = { overflow, carry0, carry1, floating_overflow,
 			 first_part_done, user, userIO, 4'b0,
 			 floating_underflow, no_divide, 5'b0 };
@@ -434,6 +690,10 @@ module apr
       if (set_first_part_done) first_part_done <= 1;
       if (set_no_divide) no_divide <= 1;
       
+      // set_user comes from the uengine while clr_user comes from the interrupt processing
+      if (set_user) user <= 1;
+      else if (clr_user) user <= 0;
+
       if (PSW_load) begin	// load PSW from the left half of write_data
 	 overflow <= write_data[0];
 	 carry0 <= write_data[1];
@@ -456,15 +716,16 @@ module apr
    reg [63:0] uROM [0:2047];	// microcode ROM
    reg [63:0] uinst;		// set the width once I'm done !!!
 
+   assign udisint = uinst[61];
    assign mul_start = uinst[60];
    assign set_no_divide = uinst[59];
    assign set_first_part_done = uinst[58];
    assign clear_first_part_done = uinst[57];
    assign set_overflow = uinst[56];
    assign clear_flags = uinst[55];
-
-   assign set_flags = uinst[53];
-
+   assign set_flags = uinst[54];
+   assign start_interrupt = uinst[53];
+   assign set_user = uinst[52];
    assign PSW_load = uinst[51];
    assign ACnext = uinst[50];
    assign ACindex = uinst[49];
@@ -473,7 +734,7 @@ module apr
    assign IX_load = uinst[46];
    assign OpA_load = uinst[45];
 
-   assign PC_load = uinst[42];
+   assign uPC_load = uinst[42];
    assign Mreg_load = uinst[41];
    assign Areg_load = uinst[40];
    assign Breg_load = uinst[39];
@@ -542,7 +803,7 @@ module apr
 
 	// mem read - a 4-way branch for reading from memory
 	1: case (1'b1)
-//	     interrupt:		ubranch[1:0] = 3;	// implement interrupts !!!
+	     read_ack & interrupt_request & ~start_interrupt:	ubranch[1:0] = 3;
 	     mem_page_fail:	ubranch[1:0] = 2;
 	     read_ack:		ubranch[1:0] = 1;
 	     default:		ubranch[1:0] = 0;
@@ -575,7 +836,7 @@ module apr
 	// special cases to optimze certain instructions.  Also, I/O instructions are handled
 	// specially.
 	5: if (ReadE)
-	  ubranch[8:0] = 9'o720;
+	  ubranch[8:0] = 9'o740;
 	else
 	  ubranch[8:0] = dispatch;
 
@@ -641,17 +902,14 @@ module apr
    // simulator too. !!!
    reg [`WORD] 	 cycles;
    reg [`WORD] 	 instruction_count;
-   reg [`ADDR] 	 inst_addr;
+   reg [`ADDR] 	 read_addr;
 
    always @(posedge clk) begin
       cycles <= cycles+1;
 
-      // When the Op is loaded, remember the instruction address for the disassembler
-      if (OpA_load) begin
-	 inst_addr <= mem_addr;
-	 instruction_count <= instruction_count + 1;
-      end
-      
+      // the read address may go away before OpA_load is set, so remember it
+      if (mem_read) read_addr <= mem_addr;
+
       if (reset) begin
 	 instruction_count <= 0;
 	 cycles <= 0;
@@ -662,6 +920,8 @@ module apr
       end
 
       if (OpA_load) begin
+	 instruction_count <= instruction_count + 1;
+	 
 	 // this is a horrible hack but it's really handy for running a bunch of
 	 // tests and DaveC's tests all loop back to 001000 !!!
 	 if ((PC == `ADDRSIZE'o1000) && (instruction_count != 0)) begin
@@ -671,7 +931,7 @@ module apr
 	 end
 
 	 // disassembler
-	 $display("%6o: %6o,%6o %s", mem_addr, write_data[0:17], write_data[18:35], disasm(write_data));
+	 $display("%6o: %6o,%6o %s", read_addr, write_data[0:17], write_data[18:35], disasm(write_data));
       end // if (OpA_load)
 
 `ifdef NOTDEF
@@ -704,6 +964,8 @@ module apr
    wire [0:8] dispatch;		// main instruction branch in the micro-code
    wire [`DEVICE] io_dev;	// the I/O Device
    wire io_cond; 	  	// I/O Device Conditions
+   wire int_jump;		// interrupt instruction is special as a jump
+   wire int_skip;		// interrupt instruction is special as a skip
    wire [`WORD] dinst = OpA_load ? write_data : inst;
    decode decode(.inst(dinst),
 		 .user(user),
@@ -712,7 +974,9 @@ module apr
  		 .ReadE(dReadE),
 		 .condition_code(condition_code),
  		 .io_dev(io_dev),
-		 .io_cond(io_cond));
+		 .io_cond(io_cond),
+		 .int_jump(int_jump),
+		 .int_skip(int_skip));
    always @(posedge clk) begin
       // After we read E, clear the flag so we can dispatch again and not read E again
       if (ubranch_code == 5)	// dispatch

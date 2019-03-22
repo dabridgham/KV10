@@ -70,19 +70,19 @@ wrself:	aE,mM,aluSETM,writeMEM,brWRITE	.
 ;;; 0060
 	;; write M to AC if AC is not 0
 wrselfA:	aPCnext,aluSETA,loadPC,readMEM,brREAD	fetchPC
-	mM,aluSETM,writeAC	next
+	aPCnext,mM,aluSETM,writeAC,loadPC,readMEM,brREAD	fetchPC
 	halt
 	halt
 	;; write M to memory and then to AC
 wrboth:	aE,mM,aluSETM,writeMEM,brWRITE	.
-	mM,aluSETM,setFLAGS,writeAC	next
+	aPCnext,mM,aluSETM,setFLAGS,writeAC,loadPC,readMEM,brREAD	fetchPC
 	jump	fault
 	;; finish up with a jump to E
 jumpe:	aE,aluSETA,loadPC,readMEM,brREAD	fetchPC
 ;;; 0070
 	;; finish up the EXCH instruction
 exch:	aE,mAC,aluSETM,writeMEM,brWRITE	.
-	mM,aluSETM,writeAC	next ; write M to AC and we're done
+	aPCnext,mM,aluSETM,writeAC,loadPC,readMEM,brREAD	fetchPC ; write M to AC and we're done
 	jump	fault
 	halt
 	;; Jump if any of the flags were cleared
@@ -153,7 +153,7 @@ pop:	aAC,readMEM,brREAD	.
 	jump	fault
 	jump	intrpt
 pop3:	aE,writeMEM,brWRITE	.
-	mAC,aluSOB,writeAC	next
+	aPCnext,mAC,aluSOB,writeAC,loadPC,readMEM,brREAD	fetchPC
 	jump	fault
 pop2:	aE,mM,aluSETM,writeMEM,brWRITE	pop3
 ;;; 0160
@@ -183,7 +183,7 @@ popj2:	aM,mAC,aluSOB,loadPC,writeAC,readMEM,brWRITE	fetchPC ; decrement AC
 ashc:	aAC,mE,aluASHC,loadB,writeAC,saveFLAGS,setFLAGS	wrb
 rotc:	aAC,mE,aluROTC,loadB,writeAC				wrb
 lshc:	aAC,mE,aluLSHC,loadB,writeAC				wrb
-wrb:	aluSETB,ACnext,writeAC	next ; write B into A+1
+wrb:	aPCnext,aluSETB,ACnext,writeAC,loadPC,readMEM,brREAD	fetchPC ; write B into A+1
 	halt
 	halt
 	halt
@@ -232,8 +232,7 @@ mul42:	aA,mM,aluMULADD,loadA,loadB,brMUL	imulwr
 	halt
 	;;  writing to memory for IMULB
 imulb1:	aE,mM,aluSETM,writeMEM,brWRITE	.
-	;; if I loaded PC from mem_addr, this could load the new PC here !!!
-	mM,aluSETM,setFLAGS,writeAC		next ; write to AC
+	aPCnext,mM,aluSETM,loadPC,setFLAGS,writeAC,readMEM,brREAD	fetchPC ; write to AC
 	jump	fault
 imulb:	aE,mM,aluSETM,writeMEM,brWRITE		imulb1 ; start the write to memory
 ;;; 0260
@@ -394,7 +393,7 @@ bltdone:	mAC,aluAOB,writeAC	bltrd
 	halt
 	halt
 	;; Write the JFFO result into AC+1 and either jump or not
-jffo:	mM,aluSETM,ACnext,writeAC	next
+jffo:	aPCnext,mM,aluSETM,ACnext,writeAC,loadPC,readMEM,brREAD	fetchPC
 	mM,aluSETM,ACnext,writeAC	jumpe
 	halt
 	halt
@@ -615,127 +614,129 @@ jffo:	mM,aluSETM,ACnext,writeAC	next
 	halt
 	halt
 ;;; 0760
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
+	;; Read the trap instruction for a UUO
+uuord:	brREAD	.
+	mMEM,aluSETM,loadOPA,loadIX,loadY,loadM,brIX	calcEA ; execute the instruction
+	jump	fault
+	jump	intrpt
+	;; write the faulting instruction into memory
+uuowr:	brWRITE	.
+	aONE,mM,aluADD,loadM	uuofetch ; increment the address in M
+	jump	fault
+uuofetch:	aM,readMEM,brREAD	uuord ; start reading the trap instruction
 ;;; 0770
-fault:	halt
-intrpt:	halt
+fault:	halt			; figure out what to do with page faults !!!
+UUO:	aVECTOR,aluSETA,loadM	uuo1 ; move the trap address into M
+uuo1:	aM,mINST,aluSETM,writeMEM,brWRITE	uuowr ; start the write
+MUUO:	halt
 	halt
 	halt
 	halt
-	halt
-	halt
-	halt
+intrpt:	aVECTOR,startINT,readMEM,brREAD	fetchPC
 ;;; 1000
 	;; The instruction dispatch table starts here
-dispatch:	halt
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
+dispatch:	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
 ;;; 1010
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
 ;;; 1020
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
 ;;; 1030
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
 ;;; 1040
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
 ;;; 1050
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
 ;;; 1060
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
 ;;; 1070
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
 ;;; 1100
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
 ;;; 1110
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
 ;;; 1120
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
 ;;; 1130
-	halt
-	halt
-	halt
+	jump	UUO
+	jump	UUO
+	jump	UUO
 	;; The Byte Instructions
 	aE,mM,aluIBP,loadM,writeMEM,brWRITE	wrmem  ; IBP - Do I need to clearFPD here !!!
 	brFPD					fpd    ; ILDB - Could make the FPD check part of DISPATCH !!!
@@ -743,59 +744,59 @@ dispatch:	halt
 	brFPD					fpd    ; IDBP - Could make the FPD check part of DISPATCH !!!m
 	mM,aluSETM,loadBP,loadIX,loadY,brIX	byteEA ; DPB - move M over to BP, I, X, and Y
 ;;; 1140
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
 ;;; 1150
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
 ;;; 1160
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
 ;;; 1170
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
+	jump	UUO
 ;;; 1200
-	mM,aluSETM,writeAC			next ; MOVE - AC <- C(E)
-	mE,aluSETM,writeAC			next ; MOVEI - AC <- 0,E
-	aE,mAC,aluSETM,loadM,writeMEM,brWRITE	wrmem ; MOVEM - C(E) <- AC
-	aE,mM,aluSETM,writeMEM,brWRITE		wrself ; MOVES - C(E) and AC (if not 0) <- C(E)
-	mM,swapM,aluSETM,writeAC		next ; MOVS - AC <- swap(C(E))
-	mE,swapM,aluSETM,writeAC		next ; MOVSI - AC <- E,0
-	aE,mAC,swapM,aluSETM,loadM,writeMEM,brWRITE	wrmem ; MOVSM - C(E) <- swap(AC)
-	aE,mM,swapM,aluSETM,loadM,writeMEM,brWRITE	wrself ; MOVSS - C(E) and AC (if not 0) <- swap(C(E))
+	aPCnext,mM,aluSETM,writeAC,loadPC,readMEM,brREAD	fetchPC ; MOVE - AC <- C(E)
+	aPCnext,mE,aluSETM,writeAC,loadPC,readMEM,brREAD	fetchPC ; MOVEI - AC <- 0,E
+	aE,mAC,aluSETM,loadM,writeMEM,brWRITE			wrmem ; MOVEM - C(E) <- AC
+	aE,mM,aluSETM,writeMEM,brWRITE				wrself ; MOVES - C(E) and AC (if not 0) <- C(E)
+	aPCnext,mM,swapM,aluSETM,writeAC,loadPC,readMEM,brREAD	fetchPC ; MOVS - AC <- swap(C(E))
+	aPCnext,mE,swapM,aluSETM,writeAC,loadPC,readMEM,brREAD	fetchPC ; MOVSI - AC <- E,0
+	aE,mAC,swapM,aluSETM,loadM,writeMEM,brWRITE		wrmem ; MOVSM - C(E) <- swap(AC)
+	aE,mM,swapM,aluSETM,loadM,writeMEM,brWRITE		wrself ; MOVSS - C(E) and AC (if not 0) <- swap(C(E))
 ;;; 1210
-	mM,aluNEGATE,saveFLAGS,setFLAGS,writeAC			next ; MOVN - AC <- C(E)
-	mE,aluNEGATE,saveFLAGS,setFLAGS,writeAC			next ; MOVNI - AC <- 0,E
-	aE,mAC,aluNEGATE,saveFLAGS,loadM,writeMEM,brWRITE	wrmem ; MOVNM - C(E) <- AC
-	aE,mM,aluNEGATE,saveFLAGS,loadM,writeMEM,brWRITE	wrself ; MOVNS - C(E) and AC (if not 0) <- C(E)
-	mM,aluMAGNITUDE,saveFLAGS,setFLAGS,writeAC		next ; MOVM - AC <- C(E)
-	mE,aluMAGNITUDE,saveFLAGS,setFLAGS,writeAC		next ; MOVMI - AC <- 0,E
-	aE,mAC,aluMAGNITUDE,saveFLAGS,loadM,writeMEM,brWRITE	wrmem ; MOVMM - C(E) <- AC
-	aE,mM,aluMAGNITUDE,saveFLAGS,loadM,writeMEM,brWRITE	wrself ; MOVMS - C(E) and AC (if not 0) <- C(E)
+	aPCnext,mM,aluNEGATE,saveFLAGS,setFLAGS,writeAC,loadPC,readMEM,brREAD	fetchPC ; MOVN - AC <- C(E)
+	aPCnext,mE,aluNEGATE,saveFLAGS,setFLAGS,writeAC,loadPC,readMEM,brREAD	fetchPC ; MOVNI - AC <- 0,E
+	aE,mAC,aluNEGATE,saveFLAGS,loadM,writeMEM,brWRITE		wrmem ; MOVNM - C(E) <- AC
+	aE,mM,aluNEGATE,saveFLAGS,loadM,writeMEM,brWRITE		wrself ; MOVNS - C(E) and AC (if not 0) <- C(E)
+	aPCnext,mM,aluMAGNITUDE,saveFLAGS,setFLAGS,writeAC,loadPC,readMEM,brREAD	fetchPC ; MOVM - AC <- C(E)
+	aPCnext,mE,aluMAGNITUDE,saveFLAGS,setFLAGS,writeAC,loadPC,readMEM,brREAD	fetchPC ; MOVMI - AC <- 0,E
+	aE,mAC,aluMAGNITUDE,saveFLAGS,loadM,writeMEM,brWRITE		wrmem ; MOVMM - C(E) <- AC
+	aE,mM,aluMAGNITUDE,saveFLAGS,loadM,writeMEM,brWRITE		wrself ; MOVMS - C(E) and AC (if not 0) <- C(E)
 ;;; 1220
 imul:	aAC,aluSETB,loadB,mulstart	mul0 ; IMUL : move AC to B, mulstart also clears A
 	mE,aluSETM,loadM		imul  ; IMULI : move E into M and then proceed as MUL
@@ -826,17 +827,18 @@ div:	aAC,ACnext,aluSETB,loadB		divhi ; DIV  : B <- AC+1
 	aAC,ACnext,aluSETB,loadB	ashc ; ASHC
 	aAC,ACnext,aluSETB,loadB	rotc ; ROTC
 	aAC,ACnext,aluSETB,loadB	lshc ; LSHC
-	halt				     ; CIRC
+	jump	UUO			     ; CIRC
 ;;; 1250
 	aE,mAC,aluSETM,writeMEM,brWRITE		exch  ; EXCH : start writing AC here
 	aSWAP,readMEM,brREAD			bltrd ; BLT : start read from AC left
 	mAC,aluAOB,writeAC,loadM,brCOMP0	jumpc ; AOBJP
 	mAC,aluAOB,writeAC,loadM,brCOMP0	jumpc ; AOBJN
-	;; Plain JRST.  Other variants are dispatched to 1730
-	aE,aluSETA,readMEM,loadPC,brREAD	fetchPC
+	;; Most of the JRST variants are dispatched to 1720.  If the
+	;; instruction is disallowed, it comes here for the MUUO.
+	jump	MUUO
 	clrFLAGS,brJFCL	jfcl	; JFCL
 	aE,mM,aluSETM,loadOPA,loadIX,loadY,brIX	calcEA ; XCT
-	halt					       ; MAP
+	jump	UUO				       ; MAP
 ;;; 1260
 	aPCnext,aluSETA,loadM		pushj ; PUSHJ
 	mAC,aluAOB,loadA		push  ; PUSH
@@ -1208,38 +1210,38 @@ userio:	halt
 	halt
 	halt
 	halt
-	halt
-	halt
-	halt
+jhalt:	halt			; used as a next hop for various JRST !!!
+blki:	halt
+blko:	halt
 ;;; 1720
+	;; Plain JRST used as a jump instruction goes to the normal place in the dispatch table
+	;; but other variants come here.
+jrst:	aE,loadPC,readMEM,brREAD				fetchPC ; JRST 0 -- JRST
+	aE,loadPC,setUSER,readMEM,brREAD			fetchPC ; JRST 1 -- PORTAL
+	aE,loadPC,mM,aluSETM,loadPSW,readMEM,brREAD		fetchPC ; JRST 2 -- JRSTF
+	aE,loadPC,mM,aluSETM,setUSER,loadPSW,readMEM,brREAD	fetchPC ; JRST 3
+	aE,loadPC						jhalt   ; JRST 4 -- HALT
+	aE,loadPC,setUSER					jhalt   ; JRST 5
+	aE,loadPC,mM,aluSETM,loadPSW				jhalt   ; JRST 6
+	aE,loadPC,mM,aluSETM,setUSER,loadPSW			jhalt   ; JRST 7
+;;; 1730
+	;; delay one cycle here to let the interrupt be dismissed
+	;; before fetching the next instruction
+	disINT							jumpe ; JRST 10
+	setUSER,disINT						jumpe ; JRST 11
+	mM,aluSETM,loadPSW,disINT				jumpe ; JRST 12 -- JEN
+	mM,aluSETM,setUSER,loadPSW,disINT			jumpe ; JRST 13
+	disINT							jhalt ; JRST 14
+	setUSER,disINT						jhalt ; JRST 15
+	mM,aluSETM,loadPSW,disINT				jhalt ; JRST 16
+	mM,aluSETM,setUSER,loadPSW,disINT			jhalt ; JRST 17
+;;; 1740
 	;; if the instruction is flagged with ReadE, come here.
 	;; read C(E) into M and dispatch on the instruction again
 ReadE:	aE,readMEM,brREAD	.
 	aE,mMEM,aluSETM,loadM,brDISPATCH	dispatch
 	jump	fault
 	jump	intrpt
-	halt
-	halt
-	halt
-	halt
-;;; 1730
-	;; Plain JRST used as a jump instruction goes to the normal place in the dispatch table
-	;; but other variants come here
-	halt		       		; JRST 4 (HALT) - need a better halt!!!
-	;; the PSW is loaded from write_data while the PC is loaded from the Amux
-	aE,mM,aluSETM,readMEM,loadPSW,loadPC,brREAD	fetchPC ; JRST 10 (JRSTF)
-
-	halt
-	halt
-	halt
-	halt
-	halt
-	halt
-;;; 1740
-blki:	halt
-blko:	halt
-	halt
-	halt
 	halt
 	halt
 	halt
