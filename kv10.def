@@ -42,7 +42,7 @@
 # middle of the uword, but it was felt that this price was worth paying
 # for the benefit of being able to do a consistency check.
 
-34
+35
 
 # not using the halt bit anymore but keep it around so the
 # microassembler is happy that we're using the entire microword.
@@ -56,15 +56,16 @@ uclrfpd		none	57	1	bit	none
 usetovf		none	56	1	bit	none
 uclrflags	none	55	1	bit	none
 usetflags	none	54	1	bit	none
-ustartint	none	53	1	bit	none
+usetpdo		none	53	1	bit	none
 usetuser	none	52	1	bit	none
 uloadpsw	none	51	1	bit	none
 uacnext		none	50	1	bit	none
-uacindex	none	49	1	bit	none
+usetmuuo	none	49	1	bit	none
 uloadbp		none	48	1	bit	none
 uloady		none	47	1	bit	none
 uloadix		none	46	1	bit	none
 uloadopa	none	45	1	bit	none
+uswapm		none	44	1	bit	none
 
 upcload		none	42	1	bit	none
 uloadm		none	41	1	bit	none
@@ -75,10 +76,7 @@ uwriteio	none	37	1	bit	none
 ureadio		none	36	1	bit	none
 uwritemem	none	35	1	bit	none
 ureadmem	none	34	1	bit	none
-
-#uswapc		none	33	1	bit	none
-uswapm		none	32	1	bit	none
-#uswapa		none	31	1	bit	none
+umemclass	none	31	3	ord	none
 usaveflags 	none	30	1	bit	none
 alucmd		none	24	6	ord	none
 asel		none	20	4	ord	none
@@ -103,7 +101,7 @@ literal		none	0	11	lit	none
 # used with some, but not all, values of that field). 'yes' and 'no' are
 # the acceptable values for this token.
 
-113
+119
 
 disINT		udisint		1	no
 mulstart	umulstart	1	no
@@ -111,30 +109,37 @@ setNODIV	usetnodiv	1	no
 setFPD		usetfpd		1	no
 clrFPD		uclrfpd		1	no
 setOVF		usetovf		1	no
+setPDO		usetpdo		1	no
 clrFLAGS	uclrflags	1	no
 setFLAGS	usetflags	1	no
 saveFLAGS	usaveflags	1	no
-startINT	ustartint	1	no
 setUSER		usetuser	1	no
+setMUUO		usetmuuo	1	no
 
 loadPSW		uloadpsw	1	no
 ACnext		uacnext		1	no
-ACindex 	uacindex	1	no
 loadBP		uloadbp		1	no
 loadY		uloady		1	no
 loadIX		uloadix		1	no
 loadOPA		uloadopa	1	no
+swapM		uswapm		1	no
 loadPC		upcload 	1	no
 loadM		uloadm		1	no
 loadA		uloada		1	no
 loadB		uloadb		1	no
 writeAC		uwriteac	1	no
+
+memE1		umemclass	0	no
+memD1		umemclass	1	no
+memE2		umemclass	2	no
+memD2		umemclass	3	no
+memIF		umemclass	4	no
+
 writeIO		uwriteio	1	no
 readIO 		ureadio		1	no
 writeMEM	uwritemem	1	no
 readMEM		ureadmem	1	no
 
-swapM	uswapm	1	no
 
 aZERO	asel	0	no
 aONE	asel	1	no
@@ -151,6 +156,7 @@ aSWAP	asel	11	no
 aBPMASK	asel	12	no
 aM	asel	13	no
 aE	asel	14	no
+aX	asel	15	no
 
 mM	msel	0	no
 mAC	msel	1	no

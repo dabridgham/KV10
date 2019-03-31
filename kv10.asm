@@ -5,39 +5,41 @@
 	;; at startup or reset, we begin executing from location 0000
 reset:	aluSETZ,loadM		clrPSW	; move 0 into M
 clrPSW:	mM,aluSETM,loadPSW	initpc	; clear the PSW (could do this and the previos instruction in one step now!!!)
-initpc:	aINIT,aluSETA,loadPC	fetchPC	; setup the initial PC
-	halt
+initpc:	aINIT,loadPC		fetch	; setup the initial PC
+fetch:	aPC,readMEM,memIF,brREAD	fetchI	; a common point to start an instruction fetch from PC
 	halt
 	halt
 	halt
 	halt
 ;;; 0010
 	;; load an instruction from the PC
-fetchPC:	aPC,readMEM,brREAD	. ; loop, waiting for a response
-	;; load the instruction and start the EA calculation
-	;; saveFLAGS has the effect here of clearing the saved flags
-	aPC,mMEM,aluSETM,saveFLAGS,loadOPA,loadIX,loadY,brIX	calcEA
-	jump	fault
-	jump	intrpt
+fetchI:	brREAD	. ; loop, waiting for a response
+	;; load the instruction and start the EA calculation saveFLAGS has the effect here
+	;; of clearing the saved flags
+	mMEM,aluSETM,saveFLAGS,loadM,loadOPA,loadIX,loadY,brIX	calcEA
 	halt
 	halt
+	;; Read the Index Register.  In some cases (using XCTR) this could actually be
+	;; reading from memory.
+readX:	brREAD	.
+	aE,mMEM,aluADD,loadY,loadM,brI	checkI ; E <- E+(X) does this need to load M with MEM rather than the sum? !!!
 	halt
 	halt
 ;;; 0020
 	;; 3-way branch on Index and Indirect (taken from write_data).
-calcEA:	ACindex,aAC,mE,aluADD,loadY,loadM,brI	checkI ; Index
-	aE,readMEM,brREAD	fetchI		       ; Indirect
-	brDISPATCH	dispatch ; EAcalc done, dispatch on the OpCode
+calcEA:	aX,readMEM,memE1,brREAD	readX ; read the Index Register
+	aE,readMEM,memE1,brREAD	readI ; Indirect
+	brDISPATCH		dispatch ; EAcalc done, dispatch on the OpCode
 	halt
 	;; do the read for an Indirect and loop back to calcEA
-fetchI:	aE,readMEM,brREAD	.
-	aE,mMEM,aluSETM,loadIX,loadY,loadM,brIX	calcEA
-	jump	fault
-	jump	intrpt
+readI:	brREAD	.
+	mMEM,aluSETM,loadIX,loadY,loadM,brIX	calcEA
+	halt
+	halt
 ;;; 0030
 	;; If there was a Index, now check if there's an Indirect too
-checkI:	brDISPATCH	dispatch ; EAcalc done, dispatch on the OpCode
-	aE,readMEM,brREAD	fetchI ; start the read for the Indirect
+checkI:	brDISPATCH		dispatch ; EAcalc done, dispatch on the OpCode
+	aE,readMEM,memE1,brREAD	readI	 ; start the read for the Indirect
 	halt
 	halt
 	halt
@@ -46,11 +48,11 @@ checkI:	brDISPATCH	dispatch ; EAcalc done, dispatch on the OpCode
 	halt
 ;;; 0040
 	;; conditional jump
-jumpc:	aPCnext,aluSETA,loadPC,readMEM,brREAD	fetchPC
-	aE,mE,aluSETM,loadPC,readMEM,brREAD	fetchPC
+jumpc:	aPCnext,aluSETA,loadPC,readMEM,memIF,brREAD	fetchI
+	aE,mE,aluSETM,loadPC,readMEM,memIF,brREAD	fetchI
 	;; conditional skip
-skipc:	aPCnext,aluSETA,loadPC,readMEM,brREAD	fetchPC
-	aPCskip,aluSETA,loadPC,readMEM,brREAD	fetchPC
+skipc:	aPCnext,aluSETA,loadPC,readMEM,memIF,brREAD	fetchI
+	aPCskip,aluSETA,loadPC,readMEM,memIF,brREAD	fetchI
 	;; for SKIP and SOS instructions, write M to AC if AC not 0
 wrskip:	mM,aluSETM,brCOMP0		skipc
 	mM,aluSETM,writeAC,brCOMP0	skipc
@@ -58,43 +60,43 @@ wrskip:	mM,aluSETM,brCOMP0		skipc
 	halt
 ;;; 0050
 	;; write M to memory
-wrmem:	aE,mM,aluSETM,writeMEM,brWRITE	.
-	aPCnext,aluSETA,setFLAGS,loadPC,readMEM,brREAD	fetchPC
-	jump	fault
+wrmem1:	brWRITE	.
+	aPCnext,aluSETA,setFLAGS,loadPC,readMEM,memIF,brREAD	fetchI
+wrmem:	aE,mM,aluSETM,writeMEM,memD1,brWRITE	wrmem1
 	halt
 	;; write M to memory and then to AC if AC not 0
-wrself:	aE,mM,aluSETM,writeMEM,brWRITE	.
+wrself1:	brWRITE	.
 	setFLAGS,brSELF	wrselfA
-	jump	fault
+wrself:	aE,mM,aluSETM,writeMEM,memD1,brWRITE	wrself1
 	halt
 ;;; 0060
 	;; write M to AC if AC is not 0
-wrselfA:	aPCnext,aluSETA,loadPC,readMEM,brREAD	fetchPC
-	aPCnext,mM,aluSETM,writeAC,loadPC,readMEM,brREAD	fetchPC
+wrselfA:	aPCnext,aluSETA,loadPC,readMEM,memIF,brREAD	fetchI
+	aPCnext,mM,aluSETM,writeAC,loadPC,readMEM,memIF,brREAD	fetchI
 	halt
 	halt
 	;; write M to memory and then to AC
-wrboth:	aE,mM,aluSETM,writeMEM,brWRITE	.
-	aPCnext,mM,aluSETM,setFLAGS,writeAC,loadPC,readMEM,brREAD	fetchPC
-	jump	fault
+wrboth1:	brWRITE	.
+	aPCnext,mM,aluSETM,setFLAGS,writeAC,loadPC,readMEM,memIF,brREAD	fetchI
+wrboth:	aE,mM,aluSETM,writeMEM,memD1,brWRITE	wrboth1
 	;; finish up with a jump to E
-jumpe:	aE,aluSETA,loadPC,readMEM,brREAD	fetchPC
+jumpe:	aE,aluSETA,loadPC,readMEM,memIF,brREAD	fetchI
 ;;; 0070
 	;; finish up the EXCH instruction
-exch:	aE,mAC,aluSETM,writeMEM,brWRITE	.
-	aPCnext,mM,aluSETM,writeAC,loadPC,readMEM,brREAD	fetchPC ; write M to AC and we're done
-	jump	fault
+exch:	brWRITE	.
+	aPCnext,mM,aluSETM,writeAC,loadPC,readMEM,memIF,brREAD	fetchI ; write M to AC and we're done
+	halt
 	halt
 	;; Jump if any of the flags were cleared
-jfcl:	aPCnext,aluSETA,loadPC,readMEM,brREAD	fetchPC ; no jump
-	aE,aluSETA,loadPC,readMEM,brREAD	fetchPC ; jump
+jfcl:	aPCnext,aluSETA,loadPC,readMEM,memIF,brREAD	fetchI ; no jump
+	aE,aluSETA,loadPC,readMEM,memIF,brREAD		fetchI ; jump
 	halt
 	halt
 ;;; 0100
 	;; finish up JSA
 jsa:	brWRITE	.
 	aPCnext,mE,swapM,aluHLL,writeAC	jsa1 ; AC <- E,PC
-	jump	fault
+	halt
 jsa1:	aE,aluSETA,loadPC	next ; jump E+1
 	halt
 	halt
@@ -102,45 +104,45 @@ jsa1:	aE,aluSETA,loadPC	next ; jump E+1
 	halt
 ;;; 0110
 	;; Write to memory after SOS, then write to self and save flags
-sosWR:	aE,mM,aluSETM,writeMEM,brWRITE	. ; wait for the memory write to complete
+sosWR1:	brWRITE				.      ; wait for the memory write to complete
 	mM,aluSETM,setFLAGS,brSELF	wrskip ; now that the memory write completed, set flags
-	jump	fault
+sosWR:	aE,mM,aluSETM,writeMEM,memD1,brWRITE	sosWR1 ; start write to memory
 	halt
 	;; finish up JSR
 jsr1:	brWRITE	.
 	aE,aluSETA,loadPC,clrFPD	next ; jump E+1
-	jump	fault
-jsr:	aE,mM,aluSETM,writeMEM,brWRITE	jsr1
+	halt
+jsr:	aE,mM,aluSETM,writeMEM,memD1,brWRITE	jsr1
 ;;; 0120
 	;; For the Test instructions
 	;; The next and skip labels are for general use when we need an unconditional next or skip operation
 	;; if the operands and'd together are 0, then skip
-teste:	aPCskip,loadPC,readMEM,brREAD	fetchPC
-next:	aPCnext,loadPC,readMEM,brREAD	fetchPC
+teste:	aPCskip,loadPC,readMEM,memIF,brREAD	fetchI
+next:	aPCnext,loadPC,readMEM,memIF,brREAD	fetchI
 	;; if the operands and'd together are not 0, then skip
-testn:	aPCnext,loadPC,readMEM,brREAD	fetchPC
-skip:	aPCskip,loadPC,readMEM,brREAD	fetchPC
+testn:	aPCnext,loadPC,readMEM,memIF,brREAD	fetchI
+skip:	aPCskip,loadPC,readMEM,memIF,brREAD	fetchI
 	halt
 	halt
 	halt
 	halt
 ;;; 0130
 	;; finish up JRA
-jra1:	aA,readMEM,brREAD	.
-	aA,mMEM,aluSETM,writeAC	jumpe ; AC now gets C(LEFT(AC))
-	jump	fault
-	jump	intrpt
-jra:	aA,readMEM,brREAD	jra1 ; A has swapped AC
+jra1:	brREAD			.
+	mMEM,aluSETM,writeAC	jumpe ; AC now gets C(LEFT(AC))
+	halt
+	halt
+jra:	aA,readMEM,memD1,brREAD	jra1 ; A has swapped AC
 	halt
 	halt
 	halt
 ;;; 0140
 	;; finish up PUSH
 	;; need to catch overflow !!!
-push1:	aA,writeMEM,brWRITE	.
+push1:	brWRITE			.
 	aA,aluSETA,writeAC	next ; saved the increment AC in A into AC
-	jump	fault
-push:	aA,mM,aluSETM,writeMEM,brWRITE	push1
+	halt
+push:	aA,mM,aluSETM,writeMEM,memD1,brWRITE	push1
 	halt
 	halt
 	halt
@@ -148,34 +150,34 @@ push:	aA,mM,aluSETM,writeMEM,brWRITE	push1
 ;;; 0150
 	;; finish up POP
 	;; need to catch overflow !!!
-pop:	aAC,readMEM,brREAD	.
-	aAC,mMEM,aluSETM,loadM	pop2
-	jump	fault
-	jump	intrpt
-pop3:	aE,writeMEM,brWRITE	.
-	aPCnext,mAC,aluSOB,writeAC,loadPC,readMEM,brREAD	fetchPC
-	jump	fault
-pop2:	aE,mM,aluSETM,writeMEM,brWRITE	pop3
+pop:	brREAD			.
+	mMEM,aluSETM,loadM	pop2
+	halt
+	halt
+pop3:	brWRITE	.
+	aPCnext,mAC,aluSOB,writeAC,loadPC,setPDO,readMEM,memIF,brREAD	fetchI
+	halt
+pop2:	aE,mM,aluSETM,writeMEM,memD1,brWRITE	pop3
 ;;; 0160
 	;; Finish up PUSHJ
 	;; need to catch overflow!!!
-pushj3:	aA,writeMEM,brWRITE	.
+pushj3:	brWRITE	.
 	aA,aluSETA,writeAC,clrFPD	jumpe ; saved the incremented AC in A into AC
-	jump	fault
-pushj:	mAC,aluAOB,loadA	pushj2 ; increment AC into A
-pushj2:	aA,mM,aluSETM,writeMEM,brWRITE	pushj3 ; C(AC) <- PSW,PCnext (which is in M)
+	halt
+pushj:	mAC,aluAOB,loadA,setPDO	pushj2 ; increment AC into A
+pushj2:	aA,mM,aluSETM,writeMEM,memD1,brWRITE	pushj3 ; C(AC) <- PSW,PCnext (which is in M)
 	halt
 	halt
 	halt
 ;;; 0170
 	;; Finish up POPJ
 	;; need to catch overflow !!!
-popj:	aAC,readMEM,brREAD	.
-	aAC,mMEM,aluSETM,loadM	popj2
-	jump	fault
-	jump	intrpt
+popj:	brREAD	.
+	mMEM,aluSETM,loadM	popj2
 	;; writes M into PC and SOB(AC) into AC
-popj2:	aM,mAC,aluSOB,loadPC,writeAC,readMEM,brWRITE	fetchPC ; decrement AC
+popj2:	aM,mAC,aluSOB,loadPC,setPDO,writeAC,readMEM,memIF,brWRITE	fetch ; decrement AC
+	halt
+	halt
 	halt
 	halt
 	halt
@@ -183,7 +185,7 @@ popj2:	aM,mAC,aluSOB,loadPC,writeAC,readMEM,brWRITE	fetchPC ; decrement AC
 ashc:	aAC,mE,aluASHC,loadB,writeAC,saveFLAGS,setFLAGS	wrb
 rotc:	aAC,mE,aluROTC,loadB,writeAC				wrb
 lshc:	aAC,mE,aluLSHC,loadB,writeAC				wrb
-wrb:	aPCnext,aluSETB,ACnext,writeAC,loadPC,readMEM,brREAD	fetchPC ; write B into A+1
+wrb:	aPCnext,aluSETB,ACnext,writeAC,loadPC,readMEM,memIF,brREAD	fetchI ; write B into A+1
 	halt
 	halt
 	halt
@@ -231,10 +233,10 @@ mul41:	aA,mM,aluMULADD,loadA,loadB	mul42
 mul42:	aA,mM,aluMULADD,loadA,loadB,brMUL	imulwr
 	halt
 	;;  writing to memory for IMULB
-imulb1:	aE,mM,aluSETM,writeMEM,brWRITE	.
-	aPCnext,mM,aluSETM,loadPC,setFLAGS,writeAC,readMEM,brREAD	fetchPC ; write to AC
-	jump	fault
-imulb:	aE,mM,aluSETM,writeMEM,brWRITE		imulb1 ; start the write to memory
+imulb1:	brWRITE	.
+	aPCnext,mM,aluSETM,loadPC,setFLAGS,writeAC,readMEM,memIF,brREAD	fetchI ; write to AC
+	halt
+imulb:	aE,mM,aluSETM,writeMEM,memD1,brWRITE	imulb1 ; start the write to memory
 ;;; 0260
 	;; Do final operation to finish the multiply and then write answer where it needs to go
 imulwr:	aA,mM,aluIMULSUB,saveFLAGS,setFLAGS,writeAC,loadB	next ; MUL  : write to AC
@@ -247,15 +249,15 @@ mulwr:	aA,mM,aluMULSUB,saveFLAGS,setFLAGS,writeAC,loadB	wrb ; MUL  : write to AC
 	aA,mM,aluMULSUB,saveFLAGS,loadM,loadA,loadB		mulb ; MULB : put answer in M also
 ;;; 0270
 	;; writing to memory for MULM and IMULM
-mulm1:	aE,mM,aluSETM,writeMEM,brWRITE	.
-	aPCnext,setFLAGS,loadPC,readMEM,brREAD	fetchPC ; set flags and move on
-	jump	fault
-mulm:	aE,mM,aluSETM,writeMEM,brWRITE		mulm1 ; start the write to memory
+mulm1:	brWRITE	.
+	aPCnext,setFLAGS,loadPC,readMEM,memIF,brREAD	fetchI ; set flags and move on
+	halt
+mulm:	aE,mM,aluSETM,writeMEM,memD1,brWRITE		mulm1 ; start the write to memory
 	;;  writing to memory for MULB
-mulb1:	aE,mM,aluSETM,writeMEM,brWRITE	.
-	mM,aluSETM,setFLAGS,writeAC		wrb ; write to AC and then AC+1
-	jump	fault
-mulb:	aE,mM,aluSETM,writeMEM,brWRITE		mulb1 ; start the write to memory
+mulb1:	brWRITE	.
+	mM,aluSETM,setFLAGS,writeAC			wrb ; write to AC and then AC+1
+	halt
+mulb:	aE,mM,aluSETM,writeMEM,memD1,brWRITE		mulb1 ; start the write to memory
 ;;; 0300
 	;; IDIVx and DIVx
 div00:	aA,mM,aluDIVOP,loadA,loadB,brOVR	div01
@@ -303,7 +305,7 @@ fixr:	aA,mM,aluDIVFIXR,loadA,loadB,brMUL	idivwr
 divhi:	aAC,aluDIVMAG72,loadA,loadB	div00
 	;; check for overflow
 div01:	aA,mM,aluDIVOP,loadA,loadB	div02
-	aPCnext,aluSETA,loadPC,setOVF,setNODIV,readMEM,brREAD	fetchPC
+	aPCnext,aluSETA,loadPC,setOVF,setNODIV,readMEM,memIF,brREAD	fetchI
 ;;; 0350
 	;; Do final fixup for DIV and write answer where it needs to go
 idivwr:	aA,mM,aluDIVFIXUP,loadA,loadB,writeAC	wrb ; IDIV  : AC <- A (quotient)
@@ -316,90 +318,91 @@ idivwr:	aA,mM,aluDIVFIXUP,loadA,loadB,writeAC	wrb ; IDIV  : AC <- A (quotient)
 	aA,mM,aluDIVFIXUP,loadA,loadB,loadM		divb   ; DIVB : move quotient to M
 ;;; 0360
 	;; write to memory for IDIVM and DIVM
-divm1:	aE,mM,aluSETM,writeMEM,brWRITE	.
-	aPCnext,aluSETA,loadPC,readMEM,brREAD	fetchPC
-	jump	fault
-divm:	aE,mM,aluSETM,writeMEM,brWRITE	divm1
+divm1:	brWRITE	.
+	aPCnext,aluSETA,loadPC,readMEM,memIF,brREAD	fetchI
+	halt
+divm:	aE,mM,aluSETM,writeMEM,memD1,brWRITE	divm1
 	;; write to memory for IDIVB and DIVB
-divb1:	aE,mM,aluSETM,writeMEM,brWRITE	.
+divb1:	brWRITE	.
 	mM,aluSETM,writeAC		wrb ; AC <- quotient
-	jump	fault
-divb:	aE,mM,aluSETM,writeMEM,brWRITE	divb1
+	halt
+divb:	aE,mM,aluSETM,writeMEM,memD1,brWRITE	divb1
 ;;; 0370
 	;; EA Calculation for Byte instructions
-byteEA:	ACindex,aAC,mE,aluADD,loadY,brI	checkIBP ; Index
-	aE,readMEM,brREAD		fetchIBP ; Indirect
-	aE,readMEM,brREAD		bpREAD   ; EAcalc done, read in byte
+byteEA:	aX,readMEM,memE2,brREAD	readXBP	; Index
+	aE,readMEM,memE2,brREAD	readIBP	; Indirect
+	aE,readMEM,memD2,brREAD	bpREAD	; EAcalc done, read in byte
 	halt
 	;; do the read for an Indirect and loop back to byteEA
-fetchIBP:	aE,readMEM,brREAD	.
-	aE,mMEM,aluSETM,loadIX,loadY,brIX	byteEA
-	jump	fault
-	jump	intrpt
+readIBP:	brREAD	.
+	mMEM,aluSETM,loadIX,loadY,brIX	byteEA
+	halt
+	halt
 ;;; 0400
 	;; If there was a Index, now check if there's an Indirect too
-checkIBP:	aE,readMEM,brREAD	bpREAD   ; EAcalc done, read in byte
-	aE,readMEM,brREAD		fetchIBP ; start the read for the Indirect
+checkIBP:	aE,readMEM,memD2,brREAD	bpREAD   ; EAcalc done, read in byte
+	aE,readMEM,memE2,brREAD		readIBP ; start the read for the Indirect
 	halt
 	halt
 	;; finish writing the incremented Byte Pointer back to memory
-wrBP:	aE,mM,aluSETM,writeMEM,brWRITE	.
+wrBP:	brWRITE	.
 	mM,aluSETM,setFPD,loadBP,loadIX,loadY,brIX	byteEA	; First-Part done, now BP EA calc
-	jump	fault
+	halt
 ldb:	aBPMASK,mM,aluAND,writeAC	next ; AC <- M & BPmask
 ;;; 0410
-bpREAD:	aE,readMEM,brREAD	.
-	aE,mMEM,aluSETM,loadM,brBPDISP	bpdisp ; store the byte word in M
-	jump	fault
-	jump	intrpt
+bpREAD:	brREAD	.
+	mMEM,aluSETM,loadM,brBPDISP	bpdisp ; store the byte word in M
+	halt
+	halt
 bpdisp:	aM,mBPPNEG,aluLSH,loadM,clrFPD	ldb ; ILDB : M <- M >> P
 	aM,mBPPNEG,aluLSH,loadM		ldb ; LDB : M <- M >> P
 	aBPMASK,mBPP,aluLSH,loadB	idpb1 ; IDPB : B <- BPmask << P
 	aBPMASK,mBPP,aluLSH,loadB	dpb1 ; DPB : B <- BPmask << P
 ;;; 0420
 	;; Finish up DPB
-dpbwr:	aE,mM,aluSETM,writeMEM,brWRITE	. ; C(E) <- M
-	aPCnext,loadPC,readMEM,brREAD	fetchPC
-	jump	fault
-dpb1:	aAC,mBPP,aluLSH,loadA		dpb2 ; A <- AC << P
-dpb2:	aA,mM,aluDPB,loadM		dpbwr ; M <- A | M (masked by B)
+dpbwr:	brWRITE	.
+	aPCnext,loadPC,readMEM,memIF,brREAD	fetchI
 	halt
+dpb1:	aAC,mBPP,aluLSH,loadA		dpb2 ; A <- AC << P
+dpb2:	aA,mM,aluDPB,loadM		dpb3 ; M <- A | M (masked by B)
+dpb3:	aE,mM,aluSETM,writeMEM,memD2,brWRITE	dpbwr ; C(E) <- M
 	halt
 	halt
 ;;; 0430
 	;; Finish up IDPB.  This is identical to DPB except for clearing FPD at the end
-idpbwr:	aE,mM,aluSETM,writeMEM,brWRITE	. ; C(E) <- M
-	clrFPD,aPCnext,loadPC,readMEM,brREAD	fetchPC ; clear FPD and done
-	jump	fault
-idpb1:	aAC,mBPP,aluLSH,loadA		idpb2 ; A <- AC << P
-idpb2:	aA,mM,aluDPB,loadM		idpbwr ; M <- A | M (masked by B)
+idpbwr:	brWRITE	.
+	clrFPD,aPCnext,loadPC,readMEM,memIF,brREAD	fetchI ; clear FPD and done
 	halt
+idpb1:	aAC,mBPP,aluLSH,loadA		idpb2 ; A <- AC << P
+idpb2:	aA,mM,aluDPB,loadM		idpb3 ; M <- A | M (masked by B)
+idpb3:	aE,mM,aluSETM,writeMEM,memD2,brWRITE	idpbwr ; C(E) <- M
 	;; Either ILDP or IDPB, skip incrementing the byte pointer if FPD is set
-fpd:	aE,mM,aluIBP,loadM,writeMEM,brWRITE	wrBP
+fpd:	aE,mM,aluIBP,loadM,writeMEM,memD1,brWRITE	wrBP
 	mM,aluSETM,setFPD,loadBP,loadIX,loadY,brIX	byteEA	; First-Part done, now BP EA calc
 ;;; 0440
 	;; Read from AC left
-bltrd:	aSWAP,readMEM,brREAD		.
-	aSWAP,mMEM,aluSETM,loadM	bltwr ; start write. if I latch the read data, I can start the write here !!!
-	jump	fault
-	jump	intrpt
-bltwr:	aAC,mM,aluSETM,writeMEM,brWRITE	.
-	aAC,brBLTDONE	bltdone
-	jump	fault
+bltrd:	brREAD		.
+	aAC,mMEM,aluSETM,loadM,writeMEM,memD1,brWRITE	bltwr ; start write.
+bltwr:	brWRITE	.
+	brBLTDONE	bltfin
+bltfin:	mAC,aluAOB,writeAC	blt
+	aPCnext,aluSETA,loadPC,readMEM,memIF,brREAD	fetchI
+	halt
 	halt
 ;;; 0450
-bltdone:	mAC,aluAOB,writeAC	bltrd
-	aPCnext,aluSETA,loadPC,readMEM,brREAD	fetchPC
+	halt
+	halt
 	halt
 	halt
 	;; Write the JFFO result into AC+1 and either jump or not
-jffo:	aPCnext,mM,aluSETM,ACnext,writeAC,loadPC,readMEM,brREAD	fetchPC
+jffo:	aPCnext,mM,aluSETM,ACnext,writeAC,loadPC,readMEM,memIF,brREAD	fetchI
 	mM,aluSETM,ACnext,writeAC	jumpe
 	halt
 	halt
 ;;; 0460
-	halt
-	halt
+	;; Read Index Register for Byte Instructions
+readXBP:	brREAD	.
+	aE,mMEM,aluADD,loadY,brI	checkIBP ; E <- E+(X)
 	halt
 	halt
 	halt
@@ -616,26 +619,32 @@ jffo:	aPCnext,mM,aluSETM,ACnext,writeAC,loadPC,readMEM,brREAD	fetchPC
 ;;; 0760
 	;; Read the trap instruction for a UUO
 uuord:	brREAD	.
-	mMEM,aluSETM,loadOPA,loadIX,loadY,loadM,brIX	calcEA ; execute the instruction
-	jump	fault
-	jump	intrpt
+	mMEM,aluSETM,saveFLAGS,loadOPA,loadIX,loadY,loadM,brIX	calcEA ; execute the instruction
+	halt
+	halt
 	;; write the faulting instruction into memory
 uuowr:	brWRITE	.
 	aONE,mM,aluADD,loadM	uuofetch ; increment the address in M
-	jump	fault
-uuofetch:	aM,readMEM,brREAD	uuord ; start reading the trap instruction
+	halt
+uuofetch:	aM,readMEM,memD1,brREAD	uuord ; start reading the trap instruction
 ;;; 0770
-fault:	halt			; figure out what to do with page faults !!!
+	halt
 UUO:	aVECTOR,aluSETA,loadM	uuo1 ; move the trap address into M
-uuo1:	aM,mINST,aluSETM,writeMEM,brWRITE	uuowr ; start the write
-MUUO:	halt
-	halt
-	halt
-	halt
-intrpt:	aVECTOR,startINT,readMEM,brREAD	fetchPC
+uuo1:	aM,mINST,aluSETM,writeMEM,memD1,brWRITE	uuowr ; start the write
+MUUO:	setMUUO	UUO
+unass:	setMUUO	UUO		; unassigned code - same as MUUO for now
+	;; This Page Fault handler address is known to the micro-engine.  Don't move this
+	;; without changing the other.
+FAULT:	jump	fetch
+	;; This interrupt handler is as an address known by the micro-engine.  Don't
+	;; change one without changing the other.  It spends a cycle, saving the vector in
+	;; A, to let the memory read where this interrupt was recognized clear before
+	;; trying to read the interrupt vector.
+int1:	aA,readMEM,memIF,brREAD	fetchI
+INTRPT:	aVECTOR,aluSETA,loadA		int1
 ;;; 1000
 	;; The instruction dispatch table starts here
-dispatch:	jump	UUO
+dispatch:	jump	MUUO
 	jump	UUO
 	jump	UUO
 	jump	UUO
@@ -671,132 +680,132 @@ dispatch:	jump	UUO
 	jump	UUO
 	jump	UUO
 ;;; 1040
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
+	jump	MUUO
+	jump	MUUO
+	jump	MUUO
+	jump	MUUO
+	jump	MUUO
+	jump	MUUO
+	jump	MUUO
+	jump	MUUO
 ;;; 1050
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
+	jump	MUUO
+	jump	MUUO
+	jump	MUUO
+	jump	MUUO
+	jump	MUUO
+	jump	MUUO
+	jump	MUUO
+	jump	MUUO
 ;;; 1060
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
+	jump	MUUO
+	jump	MUUO
+	jump	MUUO
+	jump	MUUO
+	jump	MUUO
+	jump	MUUO
+	jump	MUUO
+	jump	MUUO
 ;;; 1070
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
+	jump	MUUO
+	jump	MUUO
+	jump	MUUO
+	jump	MUUO
+	jump	MUUO
+	jump	MUUO
+	jump	MUUO
+	jump	MUUO
 ;;; 1100
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
 ;;; 1110
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
 ;;; 1120
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
 ;;; 1130
-	jump	UUO
-	jump	UUO
-	jump	UUO
+	jump	unass
+	jump	unass
+	jump	unass
 	;; The Byte Instructions
-	aE,mM,aluIBP,loadM,writeMEM,brWRITE	wrmem  ; IBP - Do I need to clearFPD here !!!
+	aE,mM,aluIBP,loadM,writeMEM,memD1,brWRITE	wrmem1 ; IBP - Do I need to clearFPD here !!!
 	brFPD					fpd    ; ILDB - Could make the FPD check part of DISPATCH !!!
 	mM,aluSETM,loadBP,loadIX,loadY,brIX	byteEA ; LDB - move M over to BP, I, X, and Y
-	brFPD					fpd    ; IDBP - Could make the FPD check part of DISPATCH !!!m
+	brFPD					fpd    ; IDBP - Could make the FPD check part of DISPATCH !!!
 	mM,aluSETM,loadBP,loadIX,loadY,brIX	byteEA ; DPB - move M over to BP, I, X, and Y
 ;;; 1140
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
 ;;; 1150
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
 ;;; 1160
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
 ;;; 1170
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
-	jump	UUO
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
+	jump	unass
 ;;; 1200
-	aPCnext,mM,aluSETM,writeAC,loadPC,readMEM,brREAD	fetchPC ; MOVE - AC <- C(E)
-	aPCnext,mE,aluSETM,writeAC,loadPC,readMEM,brREAD	fetchPC ; MOVEI - AC <- 0,E
-	aE,mAC,aluSETM,loadM,writeMEM,brWRITE			wrmem ; MOVEM - C(E) <- AC
-	aE,mM,aluSETM,writeMEM,brWRITE				wrself ; MOVES - C(E) and AC (if not 0) <- C(E)
-	aPCnext,mM,swapM,aluSETM,writeAC,loadPC,readMEM,brREAD	fetchPC ; MOVS - AC <- swap(C(E))
-	aPCnext,mE,swapM,aluSETM,writeAC,loadPC,readMEM,brREAD	fetchPC ; MOVSI - AC <- E,0
-	aE,mAC,swapM,aluSETM,loadM,writeMEM,brWRITE		wrmem ; MOVSM - C(E) <- swap(AC)
-	aE,mM,swapM,aluSETM,loadM,writeMEM,brWRITE		wrself ; MOVSS - C(E) and AC (if not 0) <- swap(C(E))
+	aPCnext,mM,aluSETM,writeAC,loadPC,readMEM,memIF,brREAD	fetchI ; MOVE - AC <- C(E)
+	aPCnext,mE,aluSETM,writeAC,loadPC,readMEM,memIF,brREAD	fetchI ; MOVEI - AC <- 0,E
+	aE,mAC,aluSETM,loadM,writeMEM,memD1,brWRITE		wrmem1 ; MOVEM - C(E) <- AC
+	aE,mM,aluSETM,writeMEM,memD1,brWRITE			wrself1 ; MOVES - C(E) and AC (if not 0) <- C(E)
+	aPCnext,mM,swapM,aluSETM,writeAC,loadPC,readMEM,memIF,brREAD	fetchI ; MOVS - AC <- swap(C(E))
+	aPCnext,mE,swapM,aluSETM,writeAC,loadPC,readMEM,memIF,brREAD	fetchI ; MOVSI - AC <- E,0
+	aE,mAC,swapM,aluSETM,loadM,writeMEM,memD1,brWRITE		wrmem1 ; MOVSM - C(E) <- swap(AC)
+	aE,mM,swapM,aluSETM,loadM,writeMEM,memD1,brWRITE		wrself1 ; MOVSS - C(E) and AC (if not 0) <- swap(C(E))
 ;;; 1210
-	aPCnext,mM,aluNEGATE,saveFLAGS,setFLAGS,writeAC,loadPC,readMEM,brREAD	fetchPC ; MOVN - AC <- C(E)
-	aPCnext,mE,aluNEGATE,saveFLAGS,setFLAGS,writeAC,loadPC,readMEM,brREAD	fetchPC ; MOVNI - AC <- 0,E
-	aE,mAC,aluNEGATE,saveFLAGS,loadM,writeMEM,brWRITE		wrmem ; MOVNM - C(E) <- AC
-	aE,mM,aluNEGATE,saveFLAGS,loadM,writeMEM,brWRITE		wrself ; MOVNS - C(E) and AC (if not 0) <- C(E)
-	aPCnext,mM,aluMAGNITUDE,saveFLAGS,setFLAGS,writeAC,loadPC,readMEM,brREAD	fetchPC ; MOVM - AC <- C(E)
-	aPCnext,mE,aluMAGNITUDE,saveFLAGS,setFLAGS,writeAC,loadPC,readMEM,brREAD	fetchPC ; MOVMI - AC <- 0,E
-	aE,mAC,aluMAGNITUDE,saveFLAGS,loadM,writeMEM,brWRITE		wrmem ; MOVMM - C(E) <- AC
-	aE,mM,aluMAGNITUDE,saveFLAGS,loadM,writeMEM,brWRITE		wrself ; MOVMS - C(E) and AC (if not 0) <- C(E)
+	aPCnext,mM,aluNEGATE,saveFLAGS,setFLAGS,writeAC,loadPC,readMEM,memIF,brREAD	fetchI ; MOVN - AC <- C(E)
+	aPCnext,mE,aluNEGATE,saveFLAGS,setFLAGS,writeAC,loadPC,readMEM,memIF,brREAD	fetchI ; MOVNI - AC <- 0,E
+	aE,mAC,aluNEGATE,saveFLAGS,loadM,writeMEM,memD1,brWRITE		wrmem1 ; MOVNM - C(E) <- AC
+	aE,mM,aluNEGATE,saveFLAGS,loadM,writeMEM,memD1,brWRITE		wrself1 ; MOVNS - C(E) and AC (if not 0) <- C(E)
+	aPCnext,mM,aluMAGNITUDE,saveFLAGS,setFLAGS,writeAC,loadPC,readMEM,memIF,brREAD	fetchI ; MOVM - AC <- C(E)
+	aPCnext,mE,aluMAGNITUDE,saveFLAGS,setFLAGS,writeAC,loadPC,readMEM,memIF,brREAD	fetchI ; MOVMI - AC <- 0,E
+	aE,mAC,aluMAGNITUDE,saveFLAGS,loadM,writeMEM,memD1,brWRITE		wrmem1 ; MOVMM - C(E) <- AC
+	aE,mM,aluMAGNITUDE,saveFLAGS,loadM,writeMEM,memD1,brWRITE		wrself1 ; MOVMS - C(E) and AC (if not 0) <- C(E)
 ;;; 1220
 imul:	aAC,aluSETB,loadB,mulstart	mul0 ; IMUL : move AC to B, mulstart also clears A
 	mE,aluSETM,loadM		imul  ; IMULI : move E into M and then proceed as MUL
@@ -827,36 +836,38 @@ div:	aAC,ACnext,aluSETB,loadB		divhi ; DIV  : B <- AC+1
 	aAC,ACnext,aluSETB,loadB	ashc ; ASHC
 	aAC,ACnext,aluSETB,loadB	rotc ; ROTC
 	aAC,ACnext,aluSETB,loadB	lshc ; LSHC
-	jump	UUO			     ; CIRC
+	jump	unass			     ; CIRC
 ;;; 1250
-	aE,mAC,aluSETM,writeMEM,brWRITE		exch  ; EXCH : start writing AC here
-	aSWAP,readMEM,brREAD			bltrd ; BLT : start read from AC left
+	aE,mAC,aluSETM,writeMEM,memD1,brWRITE		exch  ; EXCH : start writing AC here
+blt:	aSWAP,readMEM,memD2,brREAD			bltrd ; BLT : start read from AC left
 	mAC,aluAOB,writeAC,loadM,brCOMP0	jumpc ; AOBJP
 	mAC,aluAOB,writeAC,loadM,brCOMP0	jumpc ; AOBJN
 	;; Most of the JRST variants are dispatched to 1720.  If the
 	;; instruction is disallowed, it comes here for the MUUO.
 	jump	MUUO
 	clrFLAGS,brJFCL	jfcl	; JFCL
-	aE,mM,aluSETM,loadOPA,loadIX,loadY,brIX	calcEA ; XCT
-	jump	UUO				       ; MAP
+	;; If we need to read the instruction with memIF, will have to change this as
+	;; well as changing the entry in decode.v !!!
+	aE,mM,aluSETM,saveFLAGS,loadOPA,loadIX,loadY,brIX	calcEA ; XCT
+	jump	unass				       ; MAP
 ;;; 1260
-	aPCnext,aluSETA,loadM		pushj ; PUSHJ
-	mAC,aluAOB,loadA		push  ; PUSH
-	aAC,readMEM,brREAD		pop   ; POP
-	aAC,readMEM,brREAD		popj  ; POPJ
-	aPCnext,aluSETA,loadM		jsr   ; JSR : C(E) <- PSW,PC, jump E+1
-	aPCnext,aluSETA,writeAC,clrFPD	jumpe ; JSP : AC <- PSW,PC, jump E
-	aE,mAC,aluSETM,writeMEM,brWRITE	jsa   ; JSA : C(E) <- AC, AC <- E,PC, jump E+1
-	mAC,swapM,aluSETM,loadA		jra   ; JRA : AC <- C(LEFT(AC)), jump E
+	aPCnext,aluSETA,loadM			pushj ; PUSHJ
+	mAC,aluAOB,loadA,setPDO			push  ; PUSH
+	aAC,readMEM,memD1,brREAD		pop   ; POP
+	aAC,readMEM,memD1,brREAD		popj  ; POPJ
+	aPCnext,aluSETA,loadM			jsr   ; JSR : C(E) <- PSW,PC, jump E+1
+	aPCnext,aluSETA,writeAC,clrFPD		jumpe ; JSP : AC <- PSW,PC, jump E
+	aE,mAC,aluSETM,writeMEM,memD1,brWRITE	jsa   ; JSA : C(E) <- AC, AC <- E,PC, jump E+1
+	mAC,swapM,aluSETM,loadA			jra   ; JRA : AC <- C(LEFT(AC)), jump E
 ;;; 1270
 	aAC,mM,aluADD,saveFLAGS,setFLAGS,writeAC	next ; ADD
 	aAC,mE,aluADD,saveFLAGS,setFLAGS,writeAC	next ; ADDI
-	aAC,mM,aluADD,saveFLAGS,loadM,brWRITE		wrmem ; ADDM
-	aAC,mM,aluADD,saveFLAGS,loadM,brWRITE		wrboth ; ADDB
+	aAC,mM,aluADD,saveFLAGS,loadM			wrmem ; ADDM
+	aAC,mM,aluADD,saveFLAGS,loadM			wrboth ; ADDB
 	aAC,mM,aluSUB,saveFLAGS,setFLAGS,writeAC	next ; SUB
 	aAC,mE,aluSUB,saveFLAGS,setFLAGS,writeAC	next ; SUBI
-	aAC,mM,aluSUB,saveFLAGS,loadM,brWRITE		wrmem ; SUBM
-	aAC,mM,aluSUB,saveFLAGS,loadM,brWRITE		wrboth ; SUBB
+	aAC,mM,aluSUB,saveFLAGS,loadM			wrmem ; SUBM
+	aAC,mM,aluSUB,saveFLAGS,loadM			wrboth ; SUBB
 ;;; 1300
 	;; Compare AC with 0,E and Skip
 	aAC,mE,aluSUB,brCOMP	skipc ; CAI -- could optimize!!!
@@ -909,14 +920,14 @@ div:	aAC,ACnext,aluSETB,loadB		divhi ; DIV  : B <- AC+1
 	aONE,mAC,aluADD,saveFLAGS,setFLAGS,writeAC,brCOMP0	jumpc ; AOJG
 ;;; 1350
 	;; Add 1 to Memory and Skip, write back to Memory and also AC if AC not 0
-	aONE,mM,aluADD,saveFLAGS,loadM,brWRITE	sosWR ; AOS
-	aONE,mM,aluADD,saveFLAGS,loadM,brWRITE	sosWR ; AOSL
-	aONE,mM,aluADD,saveFLAGS,loadM,brWRITE	sosWR ; AOSE
-	aONE,mM,aluADD,saveFLAGS,loadM,brWRITE	sosWR ; AOSLE
-	aONE,mM,aluADD,saveFLAGS,loadM,brWRITE	sosWR ; AOSA
-	aONE,mM,aluADD,saveFLAGS,loadM,brWRITE	sosWR ; AOSGE
-	aONE,mM,aluADD,saveFLAGS,loadM,brWRITE	sosWR ; AOSN
-	aONE,mM,aluADD,saveFLAGS,loadM,brWRITE	sosWR ; AOSG
+	aONE,mM,aluADD,saveFLAGS,loadM	sosWR ; AOS
+	aONE,mM,aluADD,saveFLAGS,loadM	sosWR ; AOSL
+	aONE,mM,aluADD,saveFLAGS,loadM	sosWR ; AOSE
+	aONE,mM,aluADD,saveFLAGS,loadM	sosWR ; AOSLE
+	aONE,mM,aluADD,saveFLAGS,loadM	sosWR ; AOSA
+	aONE,mM,aluADD,saveFLAGS,loadM	sosWR ; AOSGE
+	aONE,mM,aluADD,saveFLAGS,loadM	sosWR ; AOSN
+	aONE,mM,aluADD,saveFLAGS,loadM	sosWR ; AOSG
 ;;; 1360
 	;; Subtract 1 from AC and Jump
 	;; Adding -1 makes the condition codes come out right
@@ -931,95 +942,95 @@ div:	aAC,ACnext,aluSETB,loadB		divhi ; DIV  : B <- AC+1
 ;;; 1370
 	;; Subtract 1 from Memory and Skip, write back to Memory and also AC if AC not 0
 	;; Adding -1 makes the condition codes come out right
-	aMONE,mM,aluADD,saveFLAGS,loadM,brWRITE	sosWR ; SOS
-	aMONE,mM,aluADD,saveFLAGS,loadM,brWRITE	sosWR ; SOSL
-	aMONE,mM,aluADD,saveFLAGS,loadM,brWRITE	sosWR ; SOSE
-	aMONE,mM,aluADD,saveFLAGS,loadM,brWRITE	sosWR ; SOSLE
-	aMONE,mM,aluADD,saveFLAGS,loadM,brWRITE	sosWR ; SOSA
-	aMONE,mM,aluADD,saveFLAGS,loadM,brWRITE	sosWR ; SOSGE
-	aMONE,mM,aluADD,saveFLAGS,loadM,brWRITE	sosWR ; SOSN
-	aMONE,mM,aluADD,saveFLAGS,loadM,brWRITE	sosWR ; SOSG
+	aMONE,mM,aluADD,saveFLAGS,loadM	sosWR ; SOS
+	aMONE,mM,aluADD,saveFLAGS,loadM	sosWR ; SOSL
+	aMONE,mM,aluADD,saveFLAGS,loadM	sosWR ; SOSE
+	aMONE,mM,aluADD,saveFLAGS,loadM	sosWR ; SOSLE
+	aMONE,mM,aluADD,saveFLAGS,loadM	sosWR ; SOSA
+	aMONE,mM,aluADD,saveFLAGS,loadM	sosWR ; SOSGE
+	aMONE,mM,aluADD,saveFLAGS,loadM	sosWR ; SOSN
+	aMONE,mM,aluADD,saveFLAGS,loadM	sosWR ; SOSG
 ;;; 1400
 	;; The logic instructions
 	aAC,mM,aluSETZ,writeAC		next   ; SETZ
 	aAC,mE,aluSETZ,writeAC		next   ; SETZI
-	aAC,mM,aluSETZ,loadM,brWRITE	wrmem  ; SETZM
-	aAC,mM,aluSETZ,loadM,brWRITE	wrboth ; SETZB
+	aAC,mM,aluSETZ,loadM		wrmem  ; SETZM
+	aAC,mM,aluSETZ,loadM		wrboth ; SETZB
 	
 	aAC,mM,aluAND,writeAC		next   ; AND
 	aAC,mE,aluAND,writeAC		next   ; ANDI
-	aAC,mM,aluAND,loadM,brWRITE	wrmem  ; ANDM
-	aAC,mM,aluAND,loadM,brWRITE	wrboth ; ANDB
+	aAC,mM,aluAND,loadM		wrmem  ; ANDM
+	aAC,mM,aluAND,loadM		wrboth ; ANDB
 ;;; 1410
 	aAC,mM,aluANDCA,writeAC		next   ; ANDCA
 	aAC,mE,aluANDCA,writeAC		next   ; ANDCAI
-	aAC,mM,aluANDCA,loadM,brWRITE	wrmem  ; ANDCAM
-	aAC,mM,aluANDCA,loadM,brWRITE	wrboth ; ANDCAB
+	aAC,mM,aluANDCA,loadM		wrmem  ; ANDCAM
+	aAC,mM,aluANDCA,loadM		wrboth ; ANDCAB
 
 	aAC,mM,aluSETM,writeAC		next   ; SETM
 	aAC,mE,aluSETM,writeAC		next   ; SETMI
-	aAC,mM,aluSETM,loadM,brWRITE	wrmem  ; SETMM
-	aAC,mM,aluSETM,loadM,brWRITE	wrboth ; SETMB
+	aAC,mM,aluSETM,loadM		wrmem  ; SETMM
+	aAC,mM,aluSETM,loadM		wrboth ; SETMB
 ;;; 1420
 	aAC,mM,aluANDCM,writeAC		next   ; ANDCM
 	aAC,mE,aluANDCM,writeAC		next   ; ANDCMI
-	aAC,mM,aluANDCM,loadM,brWRITE	wrmem  ; ANDCMM
-	aAC,mM,aluANDCM,loadM,brWRITE	wrboth ; ANDCMB
+	aAC,mM,aluANDCM,loadM		wrmem  ; ANDCMM
+	aAC,mM,aluANDCM,loadM		wrboth ; ANDCMB
 
 	aAC,mM,aluSETA,writeAC		next   ; SETA
 	aAC,mE,aluSETA,writeAC		next   ; SETAI
-	aAC,mM,aluSETA,loadM,brWRITE	wrmem  ; SETAM
-	aAC,mM,aluSETA,loadM,brWRITE	wrboth ; SETAB
+	aAC,mM,aluSETA,loadM		wrmem  ; SETAM
+	aAC,mM,aluSETA,loadM		wrboth ; SETAB
 ;;; 1430
 	aAC,mM,aluXOR,writeAC		next   ; XOR
 	aAC,mE,aluXOR,writeAC		next   ; XORI
-	aAC,mM,aluXOR,loadM,brWRITE	wrmem  ; XORM
-	aAC,mM,aluXOR,loadM,brWRITE	wrboth ; XORB
+	aAC,mM,aluXOR,loadM		wrmem  ; XORM
+	aAC,mM,aluXOR,loadM		wrboth ; XORB
 
 	aAC,mM,aluIOR,writeAC		next   ; IOR
 	aAC,mE,aluIOR,writeAC		next   ; IORI
-	aAC,mM,aluIOR,loadM,brWRITE	wrmem  ; IORM
-	aAC,mM,aluIOR,loadM,brWRITE	wrboth ; IORB
+	aAC,mM,aluIOR,loadM		wrmem  ; IORM
+	aAC,mM,aluIOR,loadM		wrboth ; IORB
 ;;; 1440
 	aAC,mM,aluANDCB,writeAC		next   ; ANDCB
 	aAC,mE,aluANDCB,writeAC		next   ; ANDCBI
-	aAC,mM,aluANDCB,loadM,brWRITE	wrmem  ; ANDCBM
-	aAC,mM,aluANDCB,loadM,brWRITE	wrboth ; ANDCBB
+	aAC,mM,aluANDCB,loadM		wrmem  ; ANDCBM
+	aAC,mM,aluANDCB,loadM		wrboth ; ANDCBB
 
 	aAC,mM,aluEQV,writeAC		next   ; EQV
 	aAC,mE,aluEQV,writeAC		next   ; EQVI
-	aAC,mM,aluEQV,loadM,brWRITE	wrmem  ; EQVM
-	aAC,mM,aluEQV,loadM,brWRITE	wrboth ; EQVB
+	aAC,mM,aluEQV,loadM		wrmem  ; EQVM
+	aAC,mM,aluEQV,loadM		wrboth ; EQVB
 ;;; 1450
 	aAC,mM,aluSETCA,writeAC		next   ; SETCA
 	aAC,mE,aluSETCA,writeAC		next   ; SETCAI
-	aAC,mM,aluSETCA,loadM,brWRITE	wrmem  ; SETCAM
-	aAC,mM,aluSETCA,loadM,brWRITE	wrboth ; SETCAB
+	aAC,mM,aluSETCA,loadM		wrmem  ; SETCAM
+	aAC,mM,aluSETCA,loadM		wrboth ; SETCAB
 
 	aAC,mM,aluORCA,writeAC		next   ; ORCA
 	aAC,mE,aluORCA,writeAC		next   ; ORCAI
-	aAC,mM,aluORCA,loadM,brWRITE	wrmem  ; ORCAM
-	aAC,mM,aluORCA,loadM,brWRITE	wrboth ; ORCAB
+	aAC,mM,aluORCA,loadM		wrmem  ; ORCAM
+	aAC,mM,aluORCA,loadM		wrboth ; ORCAB
 ;;; 1460
 	aAC,mM,aluSETCM,writeAC		next   ; SETCM
 	aAC,mE,aluSETCM,writeAC		next   ; SETCMI
-	aAC,mM,aluSETCM,loadM,brWRITE	wrmem  ; SETCMM
-	aAC,mM,aluSETCM,loadM,brWRITE	wrboth ; SETCMB
+	aAC,mM,aluSETCM,loadM		wrmem  ; SETCMM
+	aAC,mM,aluSETCM,loadM		wrboth ; SETCMB
 
 	aAC,mM,aluORCM,writeAC		next   ; ORCM
 	aAC,mE,aluORCM,writeAC		next   ; ORCMI
-	aAC,mM,aluORCM,loadM,brWRITE	wrmem  ; ORCMM
-	aAC,mM,aluORCM,loadM,brWRITE	wrboth ; ORCMB
+	aAC,mM,aluORCM,loadM		wrmem  ; ORCMM
+	aAC,mM,aluORCM,loadM		wrboth ; ORCMB
 ;;; 1470
 	aAC,mM,aluORCB,writeAC		next   ; ORCB
 	aAC,mE,aluORCB,writeAC		next   ; ORCBI
-	aAC,mM,aluORCB,loadM,brWRITE	wrmem  ; ORCBM
-	aAC,mM,aluORCB,loadM,brWRITE	wrboth ; ORCBB
+	aAC,mM,aluORCB,loadM		wrmem  ; ORCBM
+	aAC,mM,aluORCB,loadM		wrboth ; ORCBB
 
 	aAC,mM,aluSETO,writeAC		next   ; SETO
 	aAC,mE,aluSETO,writeAC		next   ; SETOI
-	aAC,mM,aluSETO,loadM,brWRITE	wrmem  ; SETOM
-	aAC,mM,aluSETO,loadM,brWRITE	wrboth ; SETOB
+	aAC,mM,aluSETO,loadM		wrmem  ; SETOM
+	aAC,mM,aluSETO,loadM		wrboth ; SETOB
 ;;; 1500
 	;; Half-word moves - Halfword[LR][LR][- Zeros Ones Extend][- Immediate Memory Self]
 	;;   Mode     Suffix    Source     Destination
@@ -1029,83 +1040,83 @@ div:	aAC,ACnext,aluSETB,loadB		divhi ; DIV  : B <- AC+1
 	;;  Self        S        (E)           (E) and AC if AC nonzero
 	aAC,mM,aluHLL,writeAC			next   ; HLL
 	aAC,mE,aluHLL,writeAC			next   ; HLLI
-	aM,mAC,aluHLL,loadM,brWRITE		wrmem  ; HLLM
-	aM,mM,aluHLL,loadM,brWRITE		wrself ; HLLS
+	aM,mAC,aluHLL,loadM			wrmem  ; HLLM
+	aM,mM,aluHLL,loadM			wrself ; HLLS
 
 	aAC,mM,swapM,aluHLL,writeAC		next   ; HRL
 	aAC,mE,swapM,aluHLL,writeAC		next   ; HRLI
-	aM,mAC,swapM,aluHLL,loadM,brWRITE	wrmem  ; HRLM
-	aM,mM,swapM,aluHLL,loadM,brWRITE	wrself ; HRLS
+	aM,mAC,swapM,aluHLL,loadM		wrmem  ; HRLM
+	aM,mM,swapM,aluHLL,loadM		wrself ; HRLS
 ;;; 1510
 	aZERO,mM,aluHLL,writeAC			next   ; HLLZ
 	aZERO,mE,aluHLL,writeAC			next   ; HLLZI
-	aZERO,mAC,aluHLL,loadM,brWRITE		wrmem  ; HLLZM
-	aZERO,mM,aluHLL,loadM,brWRITE		wrself ; HLLZS
+	aZERO,mAC,aluHLL,loadM			wrmem  ; HLLZM
+	aZERO,mM,aluHLL,loadM			wrself ; HLLZS
 
 	aZERO,mM,swapM,aluHLL,writeAC		next   ; HRLZ
 	aZERO,mE,swapM,aluHLL,writeAC		next   ; HRLZI
-	aZERO,mAC,swapM,aluHLL,loadM,brWRITE	wrmem  ; HRLZM
-	aZERO,mM,swapM,aluHLL,loadM,brWRITE	wrself ; HRLZS
+	aZERO,mAC,swapM,aluHLL,loadM		wrmem  ; HRLZM
+	aZERO,mM,swapM,aluHLL,loadM		wrself ; HRLZS
 ;;; 1520
 	aMONE,mM,aluHLL,writeAC			next   ; HLLO
 	aMONE,mE,aluHLL,writeAC			next   ; HLLOI
-	aMONE,mAC,aluHLL,loadM,brWRITE		wrmem  ; HLLOM
-	aMONE,mM,aluHLL,loadM,brWRITE		wrself ; HLLOS
+	aMONE,mAC,aluHLL,loadM			wrmem  ; HLLOM
+	aMONE,mM,aluHLL,loadM			wrself ; HLLOS
 
 	aMONE,mM,swapM,aluHLL,writeAC		next   ; HRLO
 	aMONE,mE,swapM,aluHLL,writeAC		next   ; HRLOI
-	aMONE,mAC,swapM,aluHLL,loadM,brWRITE	wrmem  ; HRLOM
-	aMONE,mM,swapM,aluHLL,loadM,brWRITE	wrself ; HRLOS
+	aMONE,mAC,swapM,aluHLL,loadM		wrmem  ; HRLOM
+	aMONE,mM,swapM,aluHLL,loadM		wrself ; HRLOS
 ;;; 1530
 	aSXT,mM,aluHLL,writeAC			next   ; HLLE
 	aSXT,mE,aluHLL,writeAC			next   ; HLLEI
-	aSXT,mAC,aluHLL,loadM,brWRITE		wrmem  ; HLLEM
-	aSXT,mM,aluHLL,loadM,brWRITE		wrself ; HLLES
+	aSXT,mAC,aluHLL,loadM			wrmem  ; HLLEM
+	aSXT,mM,aluHLL,loadM			wrself ; HLLES
 
 	aSXT,mM,swapM,aluHLL,writeAC		next   ; HRLE
 	aSXT,mE,swapM,aluHLL,writeAC		next   ; HRLEI
-	aSXT,mAC,swapM,aluHLL,loadM,brWRITE	wrmem  ; HRLEM
-	aSXT,mM,swapM,aluHLL,loadM,brWRITE	wrself ; HRLES
+	aSXT,mAC,swapM,aluHLL,loadM		wrmem  ; HRLEM
+	aSXT,mM,swapM,aluHLL,loadM		wrself ; HRLES
 ;;; 1540
 	aAC,mM,swapM,aluHLR,writeAC		next   ; HRR
 	aAC,mE,swapM,aluHLR,writeAC		next   ; HRRI
-	aM,mAC,swapM,aluHLR,loadM,brWRITE	wrmem  ; HRRM
-	aM,mM,swapM,aluHLR,loadM,brWRITE	wrself ; HRRS
+	aM,mAC,swapM,aluHLR,loadM		wrmem  ; HRRM
+	aM,mM,swapM,aluHLR,loadM		wrself ; HRRS
 
 	aAC,mM,aluHLR,writeAC			next   ; HLR
 	aAC,mE,aluHLR,writeAC			next   ; HLRI
-	aM,mAC,aluHLR,loadM,brWRITE		wrmem  ; HLRM
-	aM,mM,aluHLR,loadM,brWRITE		wrself ; HLRS
+	aM,mAC,aluHLR,loadM			wrmem  ; HLRM
+	aM,mM,aluHLR,loadM			wrself ; HLRS
 ;;; 1550
 	aZERO,mM,swapM,aluHLR,writeAC		next   ; HRRZ
 	aZERO,mE,swapM,aluHLR,writeAC		next   ; HRRZI
-	aZERO,mAC,swapM,aluHLR,loadM,brWRITE	wrmem  ; HRRZM
-	aZERO,mM,swapM,aluHLR,loadM,brWRITE	wrself ; HRRZS
+	aZERO,mAC,swapM,aluHLR,loadM		wrmem  ; HRRZM
+	aZERO,mM,swapM,aluHLR,loadM		wrself ; HRRZS
 
 	aZERO,mM,aluHLR,writeAC			next   ; HLRZ
 	aZERO,mE,aluHLR,writeAC			next   ; HLRZI
-	aZERO,mAC,aluHLR,loadM,brWRITE		wrmem  ; HLRZM
-	aZERO,mM,aluHLR,loadM,brWRITE		wrself ; HLRZS
+	aZERO,mAC,aluHLR,loadM			wrmem  ; HLRZM
+	aZERO,mM,aluHLR,loadM			wrself ; HLRZS
 ;;; 1560
 	aMONE,mM,swapM,aluHLR,writeAC		next   ; HRRO
 	aMONE,mE,swapM,aluHLR,writeAC		next   ; HRROI
-	aMONE,mAC,swapM,aluHLR,loadM,brWRITE	wrmem  ; HRROM
-	aMONE,mM,swapM,aluHLR,loadM,brWRITE	wrself ; HRROS
+	aMONE,mAC,swapM,aluHLR,loadM		wrmem  ; HRROM
+	aMONE,mM,swapM,aluHLR,loadM		wrself ; HRROS
 
 	aMONE,mM,aluHLR,writeAC			next   ; HLRO
 	aMONE,mE,aluHLR,writeAC			next   ; HLROI
-	aMONE,mAC,aluHLR,loadM,brWRITE		wrmem  ; HLROM
-	aMONE,mM,aluHLR,loadM,brWRITE		wrself ; HLROS
+	aMONE,mAC,aluHLR,loadM			wrmem  ; HLROM
+	aMONE,mM,aluHLR,loadM			wrself ; HLROS
 ;;; 1570
 	aSXT,mM,swapM,aluHLR,writeAC		next   ; HRRE
 	aSXT,mE,swapM,aluHLR,writeAC		next   ; HRREI
-	aSXT,mAC,swapM,aluHLR,loadM,brWRITE	wrmem  ; HRREM
-	aSXT,mM,swapM,aluHLR,loadM,brWRITE	wrself ; HRRES
+	aSXT,mAC,swapM,aluHLR,loadM		wrmem  ; HRREM
+	aSXT,mM,swapM,aluHLR,loadM		wrself ; HRRES
 
 	aSXT,mM,aluHLR,writeAC			next   ; HLRE
 	aSXT,mE,aluHLR,writeAC			next   ; HLREI
-	aSXT,mAC,aluHLR,loadM,brWRITE		wrmem  ; HLREM
-	aSXT,mM,aluHLR,loadM,brWRITE		wrself ; HLRES
+	aSXT,mAC,aluHLR,loadM			wrmem  ; HLREM
+	aSXT,mM,aluHLR,loadM			wrself ; HLRES
 ;;; 1600
 	;; Logical Testing and Modification (Bit Testing)
 	;; R - mask right half of AC with 0,E
@@ -1195,9 +1206,9 @@ div:	aAC,ACnext,aluSETB,loadB		divhi ; DIV  : B <- AC+1
 	aAC,mM,swapM,brTEST,aluIOR,writeAC	testn ; TSON
 ;;; 1700
 	;; I/O Instructions are mapped here
-	halt	blki
+	halt				     ; BLKI
 	readIO,brIOREAD			rdio ; DATAI : C(E) <- Device Data
-	halt	blko
+	halt				     ; BKLO
 	mM,aluSETM,writeIO,brIOWRITE	wrio ; DATAO : Device Data <- C(E)
 	mE,aluSETM,writeIO,brIOWRITE	wrio ; CONO : Device Cond <- 0,E
 	readIO,brIOREAD			rdio ; CONI : C(E) <- Device Cond
@@ -1211,15 +1222,15 @@ userio:	halt
 	halt
 	halt
 jhalt:	halt			; used as a next hop for various JRST !!!
-blki:	halt
-blko:	halt
+	halt
+	halt
 ;;; 1720
 	;; Plain JRST used as a jump instruction goes to the normal place in the dispatch table
 	;; but other variants come here.
-jrst:	aE,loadPC,readMEM,brREAD				fetchPC ; JRST 0 -- JRST
-	aE,loadPC,setUSER,readMEM,brREAD			fetchPC ; JRST 1 -- PORTAL
-	aE,loadPC,mM,aluSETM,loadPSW,readMEM,brREAD		fetchPC ; JRST 2 -- JRSTF
-	aE,loadPC,mM,aluSETM,setUSER,loadPSW,readMEM,brREAD	fetchPC ; JRST 3
+jrst:	aE,loadPC,readMEM,memIF,brREAD				fetchI ; JRST 0 -- JRST
+	aE,loadPC,setUSER,readMEM,memIF,brREAD			fetchI ; JRST 1 -- PORTAL
+	aE,loadPC,mM,aluSETM,loadPSW,readMEM,memIF,brREAD	fetchI ; JRST 2 -- JRSTF
+	aE,loadPC,mM,aluSETM,setUSER,loadPSW,readMEM,memIF,brREAD	fetchI ; JRST 3
 	aE,loadPC						jhalt   ; JRST 4 -- HALT
 	aE,loadPC,setUSER					jhalt   ; JRST 5
 	aE,loadPC,mM,aluSETM,loadPSW				jhalt   ; JRST 6
@@ -1238,10 +1249,10 @@ jrst:	aE,loadPC,readMEM,brREAD				fetchPC ; JRST 0 -- JRST
 ;;; 1740
 	;; if the instruction is flagged with ReadE, come here.
 	;; read C(E) into M and dispatch on the instruction again
-ReadE:	aE,readMEM,brREAD	.
-	aE,mMEM,aluSETM,loadM,brDISPATCH	dispatch
-	jump	fault
-	jump	intrpt
+	aE,readMEM,memD1,brREAD	ReadE
+	halt
+ReadE:	brREAD	.
+	mMEM,aluSETM,loadM,brDISPATCH	dispatch
 	halt
 	halt
 	halt
@@ -1249,12 +1260,12 @@ ReadE:	aE,readMEM,brREAD	.
 ;;; 1750
 	;; Finish up an I/O write
 wrio:	brIOWRITE	.
-	aPCnext,loadPC,readMEM,brREAD	fetchPC
+	aPCnext,loadPC,readMEM,memIF,brREAD	fetchI
 	jump	nxd
 	halt
 	;; Finish up an I/O read
 rdio:	brIOREAD	.
-	aE,mIO,aluSETM,loadM,writeMEM,brWRITE	wrmem ; write data to memory
+	aE,mIO,aluSETM,loadM,writeMEM,memD1,brWRITE	wrmem1 ; write data to memory
 	jump	nxd
 	halt
 ;;; 1760

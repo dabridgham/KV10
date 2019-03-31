@@ -13,11 +13,10 @@ module mem
    input [`PADDR]     mem_addr,
    output reg [`WORD] mem_read_data,
    input [`WORD]      mem_write_data,
-   input 	      mem_write, // only one of mem_write or mem_read
    input 	      mem_read,
-   output reg 	      write_ack,
+   input 	      mem_write,
    output reg 	      read_ack,
-   output reg 	      nxm
+   output reg  	      write_ack
    );
 
    reg [`WORD] 	      ram[0:2**`PADDRSIZE-1];
@@ -32,18 +31,20 @@ module mem
    localparam wait_time = 0;
 
    initial begin
+`ifndef LINT
       if (! $value$plusargs("file=%s", filename)) begin
          $display("ERROR: please specify +file=<filename> to start.");
          $finish_and_return(10);
       end
-
+`endif
+      
       $readmemh(filename, ram);
 
-      read_ip <= 0;
-      write_ip <= 0;
-      rw_done <= 0;
+      read_ip = 0;
+      write_ip = 0;
+      rw_done = 0;
 
-      wait_count <= 0;
+      wait_count = 0;
    end
 
    // hack for pushing the ack asynchronously so it's there a cycle earlier than the data.
@@ -52,8 +53,7 @@ module mem
    always @(*) write_ack = mem_write;
 
    always @(posedge clk) begin
-      nxm <= 0;			// all memory exists
-      write_ack <= 0;
+//      write_ack <= 0;
 //      read_ack <= 0;
 
       if (wait_count != 0)

@@ -97,6 +97,27 @@ module alu
      else
        posR = A;
 
+	
+   // Add one to both halves.  This is written KI10 style; that is, the
+   // right half does not overflow into the left.
+   wire 		     aovr;
+   wire [`HWORD] 	     al, ar;
+   wire [`WORD] 	     aob;
+   assign { aovr, al } = LEFT(M) + `HALFONE;
+   assign ar = RIGHT(M) + `HALFONE;
+   assign aob = { al, ar };
+
+   // Subtract one from both halves.  This is written KI10 style; that is, the
+   // right half does not overflow into the left.
+   wire 		     sovr;
+   wire [`HWORD] 	     sl, sr;
+   wire [`WORD] 	     sob;
+   assign { sovr, sl } = LEFT(M) - `HALFONE;
+   assign sr = RIGHT(M) - `HALFONE;
+   assign sob = { sl, sr };
+
+
+
 
    // mostly a mux to connect the outputs to the right signal lines
    always @(*) begin
@@ -289,10 +310,11 @@ module alu
 	    result = { PlessS(M), S(M), U(M), instI(M), instX(M), instY(M) };
 
 	`aluAOB:		// add 1 to both halves of M
-	  result = AOB(M);
+	  { overflow, result }  = { aovr, aob };
 
 	`aluSOB:		// subtract 1 from both halves of M
-	  result = SOB(M);
+	  { overflow, result } = { sovr, sob };
+
 
 	// rather specialized operations to implement multiplication
 	`aluMUL_ADD:

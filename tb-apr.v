@@ -1,9 +1,6 @@
 //	-*- mode: Verilog; fill-column: 90 -*-
 //
 // testbench for the kv10 processor
-//
-// 2013-02-01 dab	initial version
-// 2015-01-19 dab	added pag
 
 `timescale 1 ns / 1 ns
 
@@ -11,53 +8,63 @@
 `include "alu.vh"
 
 module apr_tb();
-   reg reset = 0;
-   reg [`ADDR] start_address = `ADDRSIZE'o1000; // need to read this out of the file!
 
    // APR <-> PAG connections
    wire [`ADDR] apr_addr;
    wire [`WORD] apr_read_data;
    wire [`WORD] apr_write_data;
    wire 	apr_user;
-   wire 	apr_write, apr_read;
+   wire 	apr_read, apr_write;
    wire 	apr_io_write, apr_io_read;
-   wire 	apr_write_ack, apr_read_ack;
-   wire 	apr_nxm, apr_page_fail;
-   wire [1:7] 	apr_pi;
+   wire 	apr_read_ack, apr_write_ack;
+   wire 	apr_page_fail;
+   wire [`DEVICE] apr_io_dev;	// the I/O Device
+   wire 	  apr_io_cond;	// I/O Device Conditions
+   wire [`WORD]   apr_io_read_data;
+   wire [`WORD]   apr_io_write_data;
+   wire 	  apr_io_read_ack;
+   wire 	  apr_io_write_ack;
+   wire 	  apr_nxd;
+   wire [1:7] 	  apr_pi;
    
-   // Just floating for now.  Eventually will connect to CACHE.
-   wire [1:7] 	pag_pi;
-
    // PAG <-> Cache connections
-   wire [`PADDR] pag_addr;
-   wire [`WORD] pag_read_data;
-   wire [`WORD] pag_write_data;
-   wire 	pag_write, pag_read;
-   wire 	pag_io_write, pag_io_read;
-   wire 	pag_write_ack, pag_read_ack;
-   wire 	pag_nxm;
+   wire [`PADDR]  pag_addr;
+   wire [`WORD]   pag_read_data;
+   wire [`WORD]   pag_write_data;
+   wire 	  pag_read, pag_write;
+   wire 	  pag_io_read, pag_io_write;
+   wire 	  pag_read_ack, pag_write_ack;
+   wire [`DEVICE] pag_io_dev;	// the I/O Device
+   wire 	  pag_io_cond;	// I/O Device Conditions
+   wire [`WORD]   pag_io_read_data;
+   wire [`WORD]   pag_io_write_data;
+   wire 	  pag_io_read_ack;
+   wire 	  pag_io_write_ack;
+   wire 	  pag_nxd;
+   wire [1:7] 	  pag_pi;
 
    // Cache <-> MEM connections
-   wire [`PADDR] mem_addr;
-   wire [`WORD] mem_read_data;
-   wire [`WORD] mem_write_data;
-   wire 	mem_write, mem_read;
-   wire 	mem_io_write, mem_io_read;
-   wire 	mem_write_ack, mem_read_ack;
-   wire 	mem_nxm;
+   wire [`PADDR]  mem_addr;
+   wire [`WORD]   mem_read_data;
+   wire [`WORD]   mem_write_data;
+   wire 	  mem_read, mem_write;
+   wire 	  mem_io_read, mem_io_write;
+   wire 	  mem_read_ack, mem_write_ack;
 
    // Cache <-> IOM connections
    wire [`DEVICE] io_dev;
    wire [`WORD]   io_read_data;
    wire [`WORD]   io_write_data;
-   wire 	  io_write;
    wire 	  io_read;
-   wire 	  io_nxm;
+   wire 	  io_write;
    wire [1:7] 	  io_pi_in;
 
-   wire [`ADDR]     display_addr;
-   wire 	    running;
+   wire [`ADDR]   display_addr;
+   wire 	  running;
 
+   reg 		  reset = 0;
+   reg 		  clk = 1;
+`ifndef LINT
    initial begin
       $dumpfile("tb-apr.lxt");
       $dumpvars(0,apr_tb);
@@ -65,26 +72,30 @@ module apr_tb();
       #0 reset = 1;
       #300 reset = 0;
 
-      #5000000 $display("Out of time");
+      #10000000 $display("Out of time");
       $finish_and_return(2);
    end
    
-   reg 		   clk = 1;
    always #50 clk = !clk;
+`endif
 
-   assign apr_pi = 0;		// once the Cache and IOM are written, this assignment goes away
-   
    apr apr(clk, reset,
-	   apr_addr, apr_read_data, apr_write_data, apr_user, apr_write, apr_read, apr_io_write, apr_io_read,
-	   apr_write_ack, apr_read_ack, apr_nxm, apr_page_fail, apr_pi,
+	   apr_addr, apr_user, apr_read_data, apr_write_data, apr_read, apr_write, 
+	   apr_write_ack, apr_read_ack, apr_page_fail, 
+	   apr_io_dev, apr_io_cond, apr_io_read_data, apr_io_write_data,
+	   apr_io_read, apr_io_write, apr_io_read_ack, apr_io_write_ack, apr_nxd, apr_pi,
 	   display_addr, running);
 
-`ifdef NOTDEF
+`define PAG 1
+`ifdef PAG
    pag pag(clk, reset, 
-	   apr_addr, apr_read_data, apr_write_data, apr_user, apr_write, apr_read, apr_io_write, apr_io_read,
-	   apr_write_ack, apr_read_ack, apr_nxm, apr_page_fail, apr_pi,
-	   pag_addr, pag_read_data, pag_write_data, pag_write, pag_read, pag_io_write, pag_io_read,
-	   pag_write_ack, pag_read_ack, pag_nxm, pag_pi);
+	   apr_addr, apr_user, apr_read_data, apr_write_data, apr_read, apr_write, 
+	   apr_read_ack, apr_write_ack, apr_page_fail,
+	   apr_io_dev, apr_io_cond, apr_io_read_data, apr_io_write_data, apr_io_read, apr_io_write,
+	   apr_io_read_ack, apr_io_write_ack, apr_nxd, apr_pi,
+	   pag_addr, pag_read_data, pag_write_data, pag_read, pag_write, pag_io_read, pag_io_write,
+	   pag_read_ack, pag_write_ack, pag_nxd, pag_pi
+);
 `else
    assign pag_addr = { 4'b0, apr_addr };
    assign apr_read_data = pag_read_data;
@@ -95,17 +106,25 @@ module apr_tb();
    assign pag_io_read = apr_io_read;
    assign apr_write_ack = pag_write_ack;
    assign apr_read_ack = pag_read_ack;
-   assign apr_nxm = pag_nxm;
+   assign pag_io_dev = apr_io_dev;
+   assign pag_io_cond = apr_io_cond;
+   assign apr_io_read_data = pag_io_read_data;
+   assign pag_io_write_data = apr_io_write_data;
+   assign apr_io_read_ack = pag_io_read_ack;
+   assign apr_io_write_ack = pag_io_write_ack;
+   assign apr_nxd = pag_nxd;
    assign apr_pi = pag_pi;
 `endif
 
-`ifdef NOTDEF
+//`define CACHE
+`ifdef CACHE
    cache cache(clk, reset,
 	       pag_addr, pag_read_data, pag_write_data, pag_write, pag_read, pag_io_write, pag_io_read,
-	       pag_write_ack, pag_read_ack, pag_nxm, pag_pi,
+	       pag_write_ack, pag_read_ack, pag_pi,
 	       mem_addr, mem_read_data, mem_write_data, mem_write, mem_read,
-	       mem_write_ack, mem_read_ack, mem_nxm,
-	       io_dev, io_read_data, io_write_data, io_write, io_read, io_nxm, io_pi_in);
+	       mem_write_ack, mem_read_ack, 
+	       io_dev, io_read_data, io_write_data, io_write, io_read, io_pi_in,
+	       pag_io_dev, pag_io_cond, pag_io_read_data, pag_io_read_ack, pag_io_write_ack, pag_nxd);
 `else
    assign mem_addr = pag_addr;
    assign pag_read_data = mem_read_data;
@@ -114,12 +133,14 @@ module apr_tb();
    assign mem_read = pag_read;
    assign pag_write_ack = mem_write_ack;
    assign pag_read_ack = mem_read_ack;
-   assign pag_nxm = mem_nxm;
+   assign pag_io_read_data = 0;
+   assign pag_io_read_ack = 0;
+   assign pag_io_write_ack = 0;
+   assign pag_nxd = 1;
    assign pag_pi = 0;
 `endif
 
-   mem mem(clk, reset,
-	   mem_addr, mem_read_data, mem_write_data, mem_write, mem_read,
-	   mem_write_ack, mem_read_ack, mem_nxm);
+   mem mem(clk, reset, mem_addr, mem_read_data, mem_write_data, 
+	   mem_read, mem_write, mem_read_ack, mem_write_ack);
 
 endmodule // apr_tb

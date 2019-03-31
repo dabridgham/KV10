@@ -18,7 +18,8 @@ module decode
    output [`DEVICE] io_dev, // the I/O device
    output reg 	    io_cond, // if the I/O is for the Device Conditions
    output reg 	    int_jump, // interrupt instruction is a jump
-   output reg 	    int_skip //  interrupt instruction is a skip
+   output reg 	    int_skip, //  interrupt instruction is a skip
+   output reg 	    xct	      // it's the XCT instruction
    );
 
 `include "opcodes.vh"
@@ -39,6 +40,7 @@ module decode
       io_cond = no;
       int_jump = no;
       int_skip = no;
+      xct = no;
 
       // verilator lint_off CASEX
       // Turn off this verilator flag and fix this !!!
@@ -142,8 +144,8 @@ module decode
 
 	JFCL: ;			// Jump on Flag and Clear
 
-	// Does E get read in the wrong mode? !!!
-	XCT: ReadE = yes;	// Execute instruction at E
+	// ReadE here will read E with memory reference class D1.  Should it be IF? !!!
+	XCT: { ReadE, xct } = { yes, yes };	// Execute instruction at E
 	
 	MAP: ;
 

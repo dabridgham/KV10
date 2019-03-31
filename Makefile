@@ -6,16 +6,18 @@ LINTOPTS = --lint-only -Wno-LITENDIAN -DLINT
 ALL: alu.check apr.check sram.check mem-sram.check mem.check pag.check cache.check
 
 ver:
-	verilator $(LINTOPTS) apr.v barrel.v
+	verilator $(LINTOPTS) --top-module apr_tb tb-apr.v apr.v barrel.v pag.sv
+#	verilator $(LINTOPTS) apr.v barrel.v
+#	verilator $(LINTOPTS) pag.sv
 
 apr.check: apr.v alu.v barrel.v $(INCLUDES)
 	iverilog -tnull $(ICOPTS) apr.v alu.v decode.v barrel.v
 alu.check: alu.v alu.vh barrel.v
 	iverilog -tnull $(ICOPTS) alu.v barrel.v
-pag.check: pag.v $(INCLUDES)
+pag.check: pag.sv $(INCLUDES)
 
-tb-apr.vvp: Makefile kv10.hex tb-apr.v apr.v alu.v barrel.v mem.v decode.v $(INCLUDES)
-	iverilog $(ICOPTS) -o tb-apr.vvp tb-apr.v apr.v alu.v barrel.v mem.v decode.v
+tb-apr.vvp: Makefile kv10.hex tb-apr.v apr.v alu.v barrel.v mem.v decode.v pag.sv $(INCLUDES)
+	iverilog $(ICOPTS) -o tb-apr.vvp tb-apr.v apr.v alu.v barrel.v mem.v decode.v pag.sv
 
 tb-alu.vvp: tb-alu.v alu.v barrel.v alu.vh
 	iverilog -o tb-alu.vvp tb-alu.v alu.v barrel.v

@@ -47,3 +47,8 @@ localparam
   PI_SGE = 28;		// Set the global enable
 `define PI_Mask 29:35		// Level mask bits
 
+// Some PAG constants
+localparam
+  INVALIDATE_EXEC = 0,
+  INVALIDATE_USER = 1,
+  INVALIDATE_SINGLE = 2;
