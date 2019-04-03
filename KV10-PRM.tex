@@ -1,5 +1,6 @@
+% -*- mode: latex; fill-column: 96 -*-
+
 \documentclass[12pt]{report}
-%Gummi|065|=)
 \pagestyle{headings}
 
 %\usepackage{fullpage}
@@ -264,6 +265,13 @@ providing a useful set of I/O ports.  This will be called Ammonite.
 
 \section{Instructions}
 
+\subsubsection{JRST}
+
+The JRST instruction works like on the KA10, with the four bits of the AC field enabling special
+functions.  However, the microcode dispatches to 16 locations allowing for more variations.  In
+particular, I'm considering adding a JRST that halts but leaves interrupts enabled like Wait for
+Interrupt from the PDP-11.
+
 \subsubsection{CIRC - Circulate}
 
 \begin{register36}
@@ -340,11 +348,10 @@ classes of instruction that have different effects when used as an interrupt ins
     condition is not satisfied, the instruction in the second interrupt location for the
     channel is executed as an interrupt instruction.
 
-  \item[everything else] All other instructions take their action then dismiss the
-    interrupt and return to the interrupted program.  This differs from the KA10 but is
-    like the KI10 and later models.  Differing from the KI10, jump and skip instructions
-    (other than those listed above) do not jump or skip but simply return to the
-    interrupted instruction.
+  \item[everything else] All other instructions take their action then dismiss the interrupt and
+    return to the interrupted program.  This differs from the KA10 but is like the KI10 and
+    later models.  Differing from the KI10, jump and skip instructions (other than those listed
+    above) do not jump or skip but simply return to the interrupted instruction.
 \end{description}
 
 \subsection{Unassigned Codes}
@@ -357,12 +364,6 @@ is controlled through the \texttt{UAC} option in \texttt{constants.vh}.  Definin
 \texttt{UAC} causes the KV10 to use locations 60 and 61 for unassigned code processing.
 \footnote{At some point I expect I will settle on one or the other and remove this compile
   option.}
-
-\subsection{Errors}
-
-The KX10 defines hard errors as coming from I/O operations to non-existent devices.  The
-KV10 may also generate hard errors on accessing non-existent memory if the MEM module is
-capable of detecting and signaling this condition.
 
 \chapter{Input / Output}
 
