@@ -135,7 +135,7 @@ module decode
 
 	JRST:			// Jump and Restory Flags
 	  // Special optimization for JRST.
-	  if (!(user & ~userIO & (inst[9] | inst[10]))) begin
+	  if (!(user & ~userIO & (inst[9] | inst[10] | inst[12]))) begin
 	     int_jump = yes;
 	     dispatch = 9'o720 | { 5'b0, inst[9:12] };
 	  end
