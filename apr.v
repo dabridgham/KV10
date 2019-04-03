@@ -745,28 +745,29 @@ module apr
    reg 	      XCTR;		// set while XCTR is executing an instruction
    wire       dXCT;		// driven by the instruction decode
    reg [0:3]  mem_access;	// latched from A when we find out it's an XCTR instruction
-   reg 	      XCTRI;		// also latched from A
+   reg 	      XCTRI;		// latched from A[0]
 
    always @(posedge clk)
-     if (reset)
-       XCTR <= 0;
-     else if (dXCT && save_flags && !user)	// when we read the instruction for XCTR to execute
-       begin
-	  XCTR <= 1;
-	  XCTRI <= A[0];
-	  case (A[1:3])
-	    0: mem_access <= 4'b0000;
-	    1: mem_access <= 4'b0100;
-	    2: mem_access <= 4'b0001;
-	    3: mem_access <= 4'b0101;
-	    4: mem_access <= 4'b1000;
-	    5: mem_access <= 4'b0111;
-	    6: mem_access <= 4'b0000;
-	    7: mem_access <= 4'b0000;
-	  endcase
-       end
-     else if (XCTR && memIF)	// this will hit when we execute the first instruction after the XCTR
-       XCTR <= 0;
+     if (reset) begin
+	XCTR <= 0;
+	XCTRI <= 0;
+     end else if (dXCT && save_flags && !user) begin // when we read the instruction for XCTR to execute
+	XCTR <= 1;
+	XCTRI <= A[0];
+	case (A[1:3])
+	  0: mem_access <= 4'b0000;
+	  1: mem_access <= 4'b0100;
+	  2: mem_access <= 4'b0001;
+	  3: mem_access <= 4'b0101;
+	  4: mem_access <= 4'b1000;
+	  5: mem_access <= 4'b0111;
+	  6: mem_access <= 4'b0000;
+	  7: mem_access <= 4'b0000;
+	endcase
+     end else if (XCTR && memIF) begin // this will hit when we execute the first instruction after the XCTR
+	XCTR <= 0;
+	XCTRI <= 0;
+     end
    
    always @(*)
      if (interrupt_instruction || MUUO)
