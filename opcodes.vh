@@ -524,7 +524,7 @@ localparam TSON = 9'o677;
 // 700040         DATAI   Data Input, from device to memory
 // 700100         BLKO    Block Output, skip if I/O not finished
 // 700140         DATAO   Data Output, from memory to device
-// 700200         CONO    Conditions Out, 36 bits AC to device
+// 700200         CONO    Conditions Out, 18 bits of E to device
 // 700240         CONI    Conditions in, 36 bits device to AC
 // 700300         CONSZ   Conditions, Skip if Zero (test 18 bits)
 // 700340         CONSO   Conditions, Skip if One (test 18 bits)
