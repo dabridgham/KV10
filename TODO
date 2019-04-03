@@ -15,9 +15,7 @@
 
  o The diagnostics for ASH and LSH are woefully incomplete.  Write some more.
 
- o Take a close look at the byte instructions with an eye to removing the byte_pointer and
-   byte_pointer_address registers.  Now that the input muxes to the ALU are registers, I
-   can probably use those and the E register to hold what I need.
+ o See about eliminating the BP registers and just adding some ALU operations to handle bytes.
 
  o Learn how the timing analysis work so I can find out how fast I can run.
 
@@ -36,7 +34,8 @@
  
  o Verify that PAG clears the AGE bit correctly.
  
- o Implement the quantum timer in PAG
+ o Implement the quantum timer in PAG.  Does it really need to only increment when the APR
+   is in PI 0?
  
  o Check that MUUOs and LUUOs read from the appropriate memory space.
  
@@ -55,3 +54,9 @@
  o Write diagnostic to test interrupt processing: second instruction, skip instructions,
    nested interrupts
    
+ o Implement and then test XCTRI.
+ 
+ o The PC input to the Amux could easily be removed.  Could get rid of ACswap as it's only
+   used for BLT and would only add one cycle each time around the loop.
+ 
+ o Handle NXD.
