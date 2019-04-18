@@ -951,7 +951,7 @@ module apr
 
 	// MUL - break out the different Multiply or Divide instructions
 	// 0: IMUL/IDIV	1: IMULI/IDIVI	2: IMULM/IDIVM	3: IMULB/IDIVB
-	// 5: MUL/DIV	6: MULI/DIVI	7: MULM/DIVM	7: MULB/DIVB
+	// 4: MUL/DIV	5: MULI/DIVI	6: MULM/DIVM	7: MULB/DIVB
 	11: ubranch[2:0] = inst[6:8];
 
 	// OVR - check ALUoverflow, used in DIV and JFFO
