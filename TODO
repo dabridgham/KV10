@@ -60,3 +60,12 @@
    used for BLT and would only add one cycle each time around the loop.
  
  o Handle NXD.
+
+ o Make sure cycles and instruction_count work when not in the simulator and make them
+   readable from software.  Also, figure out some clever way to display the ratio without
+   having to do a division.
+
+ o Make the console work, either the PiDP-10 or even a real KA10 console if I can get
+   one.  Also, make sure it works without a console ... somehow.
+
+ o Design the indicator panels and write the Verilog to support them.
