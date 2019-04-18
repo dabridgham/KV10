@@ -123,9 +123,7 @@ module decode
 	DIVM: ReadE = yes;
 	DIVB: ReadE = yes;
 	
-	// Shifts and Rotates
-	ASH, ROT, LSH, JFFO, ASHC, ROTC, LSHC, CIRC:
-	  ;
+	ASH, ROT, LSH, JFFO, ASHC, ROTC, LSHC, CIRC: ; // Shifts and Rotates
 
 	EXCH: ReadE = yes;	// Exchange, AC <-> C(E)
 	BLT: ;			// Block Transfer
@@ -178,6 +176,7 @@ module decode
 	CAIGE: { ReadE, condition_code } = { no, skipge };
 	CAIN: { ReadE, condition_code } = { no, skipn };
 	CAIG: { ReadE, condition_code } = { no, skipg };
+
 	// Compare Accumulator to Memory
 	CAM: { ReadE, condition_code } = { yes, skip_never };
 	CAML: { ReadE, condition_code } = { yes, skipl };
