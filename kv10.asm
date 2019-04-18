@@ -6,6 +6,7 @@
 reset:	aluSETZ,loadM		clrPSW	; move 0 into M
 clrPSW:	mM,aluSETM,loadPSW	initpc	; clear the PSW (could do this and the previos instruction in one step now!!!)
 initpc:	aINIT,loadPC		fetch	; setup the initial PC
+	;; This is the only use of aPC and it could be implemented elsewise (loading E and jumping there) !!!
 fetch:	aPC,readMEM,memIF,brREAD	fetchI	; a common point to start an instruction fetch from PC
 	halt
 	halt
@@ -138,7 +139,6 @@ jra:	aA,readMEM,memD1,brREAD	jra1 ; A has swapped AC
 	halt
 ;;; 0140
 	;; finish up PUSH
-	;; need to catch overflow !!!
 push1:	brWRITE			.
 	aA,aluSETA,writeAC	next ; saved the increment AC in A into AC
 	halt
@@ -149,7 +149,6 @@ push:	aA,mM,aluSETM,writeMEM,memD1,brWRITE	push1
 	halt
 ;;; 0150
 	;; finish up POP
-	;; need to catch overflow !!!
 pop:	brREAD			.
 	mMEM,aluSETM,loadM	pop2
 	halt
@@ -160,7 +159,6 @@ pop3:	brWRITE	.
 pop2:	aE,mM,aluSETM,writeMEM,memD1,brWRITE	pop3
 ;;; 0160
 	;; Finish up PUSHJ
-	;; need to catch overflow!!!
 pushj3:	brWRITE	.
 	aA,aluSETA,writeAC,clrFPD	jumpe ; saved the incremented AC in A into AC
 	halt
@@ -171,7 +169,6 @@ pushj2:	aA,mM,aluSETM,writeMEM,memD1,brWRITE	pushj3 ; C(AC) <- PSW,PCnext (which
 	halt
 ;;; 0170
 	;; Finish up POPJ
-	;; need to catch overflow !!!
 popj:	brREAD	.
 	mMEM,aluSETM,loadM	popj2
 	;; writes M into PC and SOB(AC) into AC
@@ -383,13 +380,15 @@ fpd:	aE,mM,aluIBP,loadM,writeMEM,memD1,brWRITE	wrBP
 	mM,aluSETM,setFPD,loadBP,loadIX,loadY,brIX	byteEA	; First-Part done, now BP EA calc
 ;;; 0440
 	;; Read from AC left for BLT
-bltrd:	brREAD		.
+bltrd:	brREAD	.
 	aAC,mMEM,aluSETM,loadM,writeMEM,memD1,brWRITE	bltwr ; start write.
 bltwr:	brWRITE	.
 	brBLTDONE	bltfin
+	;; check if we're done with the BLT (if the last write was to E)
 bltfin:	mAC,aluAOB,writeAC	blt
 	aPCnext,aluSETA,loadPC,readMEM,memIF,brREAD	fetchI
-	halt
+	;; start the BLT read here
+bltst:	aA,readMEM,memD2,brREAD			bltrd ; BLT : start read from AC left
 	halt
 ;;; 0450
 	halt
@@ -840,7 +839,7 @@ div:	aAC,ACnext,aluSETB,loadB		divhi ; DIV  : B <- AC+1
 	jump	unass			     ; CIRC
 ;;; 1250
 	aE,mAC,aluSETM,writeMEM,memD1,brWRITE		exch  ; EXCH : start writing AC here
-blt:	aSWAP,readMEM,memD2,brREAD			bltrd ; BLT : start read from AC left
+blt:	mAC,swapM,aluSETM,loadA			bltst ; BLT : move LEFT(AC) to A
 	mAC,aluAOB,writeAC,loadM,brCOMP0	jumpc ; AOBJP
 	mAC,aluAOB,writeAC,loadM,brCOMP0	jumpc ; AOBJN
 	;; Most of the JRST variants are dispatched to 1720.  If the
@@ -1273,11 +1272,11 @@ rdio:	brIOREAD	.
 consz:	brIOREAD	.
 	mIO,aluSETM,loadM	consz1
 	jump	nxd
-consz1:	aE,mM,aluAND,brCOMP0	skip
+consz1:	aE,mM,aluAND,brCOMP0	skipc
 conso:	brIOREAD	.
 	mIO,aluSETM,loadM	conso1
 	jump	nxd
-conso1:	aE,mM,aluIOR,brCOMP0	skip
+conso1:	aE,mM,aluIOR,brCOMP0	skipc
 ;;; 1770
 nxd:	halt			; what do I do here? !!!
 	halt
