@@ -101,7 +101,7 @@ literal		none	0	11	lit	none
 # used with some, but not all, values of that field). 'yes' and 'no' are
 # the acceptable values for this token.
 
-119
+118
 
 disINT		udisint		1	no
 mulstart	umulstart	1	no
@@ -152,7 +152,7 @@ aPC	asel	7	no
 aPCnext	asel	8	no
 aPCskip	asel	9	no
 aAC	asel	10	no
-aSWAP	asel	11	no
+#aSWAP	asel	11	no
 aBPMASK	asel	12	no
 aM	asel	13	no
 aE	asel	14	no
