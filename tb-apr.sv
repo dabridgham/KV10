@@ -4,8 +4,8 @@
 
 `timescale 1 ns / 1 ns
 
-`include "constants.vh"
-`include "alu.vh"
+`include "constants.svh"
+`include "alu.svh"
 
 module apr_tb();
 

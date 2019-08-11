@@ -8,7 +8,7 @@
 
 `timescale 1 ns / 1 ns
 
-`include "constants.vh"
+`include "constants.svh"
 
 module pag
   (
@@ -49,8 +49,8 @@ module pag
    input [1:7] 	       pi_in	// PI requests from the next stage
    );
 
-`include "functions.vh"
-`include "io.vh"
+`include "functions.svh"
+`include "io.svh"
 
    // Pass these through.
    assign pmem_io_write = io_write;

@@ -3,7 +3,7 @@
 // Instruction Decode ROM
 //
 
-`include "constants.vh"
+`include "constants.svh"
 
 `timescale 1 ns / 1 ns
 
@@ -22,9 +22,9 @@ module decode
    output reg 	    xct	      // it's the XCT instruction
    );
 
-`include "opcodes.vh"
-`include "decode.vh"
-`include "functions.vh"
+`include "opcodes.svh"
+`include "decode.svh"
+`include "functions.svh"
 
    localparam 
      no = 1'b0,

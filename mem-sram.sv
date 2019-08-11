@@ -4,7 +4,7 @@
 //
 // 2013-10-13 dab	initial version
 
-`include "constants.vh"
+`include "constants.svh"
 
 module mem_sram
   (

@@ -5,8 +5,8 @@
 
 `timescale 1 ns / 1 ns
 
-`include "constants.vh"
-`include "alu.vh"
+`include "constants.svh"
+`include "alu.svh"
 
 typedef bit [`ADDR] addr;	// these typdefs needs to move to a header file !!!
 typedef bit [`WORD] word;
@@ -43,10 +43,10 @@ module apr
    output 	    running
     );
 
-`include "functions.vh"
-`include "io.vh"
-`include "opcodes.vh"
-`include "decode.vh"
+`include "functions.svh"
+`include "io.svh"
+`include "opcodes.svh"
+`include "decode.svh"
    
 
    //
@@ -783,10 +783,9 @@ module apr
    //
 
    // the micro-instruction and its breakout
-   reg [63:0] uROM [0:2047];	// microcode ROM
-   reg [63:0] uinst;		// set the width once I'm done !!!
-   wire       umem_read;	// the micro-engine intercepts the mem_read signal
-
+   wire [63:0] uinst;		// set the width once I'm done !!!
+   wire        umem_read;	// the micro-engine intercepts the mem_read signal
+   
    // All these micro-instruction bit assignments need to match up with the values in kv10.def
    assign udisint = uinst[61];
    assign mul_start = uinst[60];
@@ -826,63 +825,65 @@ module apr
    wire [4:0] ubranch_code = uinst[15:11];
    wire [10:0] unext = uinst[10:0]; // the next instruction location
 
-   reg [10:0] uaddr, uprev;	// current and previous micro-addresses, kept for debugging
+   reg [10:0] ucurr, uprev;	// current and previous micro-addresses, kept for debugging
+   reg [10:0] uaddr;
    reg [10:0] ubranch;		// gets ORd with unext to get the next micro-address
 
-   initial $readmemh("kv10.hex", uROM);
+   uROM uROM(clk, uaddr, uinst);
 
    // the core of the microsequencer is trvial except for a little special bit for handling
    // interrupts and page faults
+   // async part
+   always @(*) begin
+      if (reset)
+	uaddr = 0;
+      else if (interrupt_request && (umem_read || read_ack))
+	// If an interrupt is being requested when a memory read starts, inhibit mem_read so the
+	// read doesn't even start and branch immediately to the interrupt handler.  Similarly, if
+	// an interrupt is being requested when a read_ack comes in, also branch to the interrupt
+	// handler.
+	uaddr = 'o777;
+      else if (mem_page_fail)
+	// If we get a page fault, immediately abort the instruction.  The next step is to try
+	// executing the same instruction.  If the PI system is set up to accept Page Fault
+	// interrupts, we'll go to the interrupt handler and take care of this.  If not, then
+	// the instruction will likely generate a page fault again which will be a double error
+	// and the processor will halt.  This double error check is not yet implemented. !!!
+	uaddr = 'o775;
+      else 
+	uaddr = unext | ubranch;
+   end
+
+   // sync part
+   always @(posedge clk) begin
+      ucurr <= uaddr;
+      if (reset)
+	 uprev <= 11'ox;
+      else
+	 uprev <= ucurr;
+   end
+
    always @(posedge clk) begin
       start_interrupt <= 0;
 
-      if (reset) begin
-	 uprev <= 'x;
-	 uaddr <= 0;
-	 uinst <= uROM[0];
+      if (interrupt_request && (umem_read || read_ack)) begin
+	 start_interrupt <= 1;
       end
+
 `ifdef SIM
       // what do I do if we hit a halt when not in the simulator?  !!!
-      else if (unext == 0) 
-	begin
-	   $display(" HALT!!!");
-	   $display("uEngine halt @%o from %o", uaddr, uprev);
-	   $display("Cycles: %0d  Instructions: %0d   Cycles/inst: %f",
-		    cycles, instruction_count, $itor(cycles)/$itor(instruction_count));
-	   $display("carry0: %b  carry1: %b  overflow: %b  floating overflow: %b",
-		    carry0, carry1, overflow, floating_overflow);
-	   $display("User: %b  UserIO: %b", user, userIO);
-	   print_ac();
-	   $finish_and_return(1);
-	end
-`endif
-      else if (interrupt_request && (umem_read || read_ack)) begin
-	 // If an interrupt is being requested when a memory read starts, inhibit mem_read so the
-	 // read doesn't even start and branch immediately to the interrupt handler.  Similarly, if
-	 // an interrupt is being requested when a read_ack comes in, also branch to the interrupt
-	 // handler.
-	 start_interrupt <= 1;
-	 uprev <= uaddr;
-	 uaddr <= 'o777;
-	 uinst <= uROM['o777];
-      end else if (mem_page_fail) begin
-	 // If we get a page fault, immediately abort the instruction.  The next step is to try
-	 // executing the same instruction.  If the PI system is set up to accept Page Fault
-	 // interrupts, we'll go to the interrupt handler and take care of this.  If not, then
-	 // the instruction will likely generate a page fault again which will be a double error
-	 // and the processor will halt.  This double error check is not yet implemented. !!!
-	 uprev <= uaddr;
-	 uaddr <= 'o0775;
-	 uinst <= uROM['o775];
-      end else begin
-	 uprev <= uaddr;
-	 uaddr <= unext | ubranch;
-	 uinst <= uROM[unext | ubranch];
-//`define UDISASM 1
-`ifdef UDISASM
-	 $display("%o", uaddr);
-`endif
+      if (unext == 0) begin
+	 $display(" HALT!!!");
+	 $display("uEngine halt @%o from %o", uaddr, uprev);
+	 $display("Cycles: %0d  Instructions: %0d   Cycles/inst: %f",
+		  cycles, instruction_count, $itor(cycles)/$itor(instruction_count));
+	 $display("carry0: %b  carry1: %b  overflow: %b  floating overflow: %b",
+		  carry0, carry1, overflow, floating_overflow);
+	 $display("User: %b  UserIO: %b", user, userIO);
+	 print_ac();
+	 $finish_and_return(1);
       end
+`endif
    end // always @ (posedge clk)
 
    // inhibit mem_read if we're requesting an interrupt
@@ -990,7 +991,7 @@ module apr
    // The disassembler
    //
 
-`include "disasm.vh"
+`include "disasm.svh"
 
    // I need to pull out the cycle and instruction count so they work when I'm not in the
    // simulator too. !!!
@@ -1081,3 +1082,20 @@ module apr
 
 
 endmodule // APR
+
+
+// ROM for the Microcode
+module uROM
+  (input clk,
+   input [10:0]  uaddr,
+   output reg [63:0] uinst
+   );
+   
+   reg [63:0] 	 uROM [0:2047];	// microcode ROM
+
+   initial $readmemh("kv10.hex", uROM);
+
+   always @(posedge clk)
+     uinst <= uROM[uaddr];
+
+endmodule // urom

@@ -4,8 +4,8 @@
 //
 // 2013-01-31 dab	initial version
 
-`include "constants.vh"
-`include "alu.vh"
+`include "constants.svh"
+`include "alu.svh"
 
 module alu_tb#(parameter width=36)();
    reg reset = 0;

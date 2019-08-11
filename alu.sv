@@ -8,8 +8,8 @@
 
 `timescale 1 ns / 1 ns
 
-`include "constants.vh"
-`include "alu.vh"
+`include "constants.svh"
+`include "alu.svh"
 
 module alu
    (
@@ -28,7 +28,7 @@ module alu
     output 		     zero
     );
    
-`include "functions.vh"
+`include "functions.svh"
 
    // the adder - The pdp10 has two carry bits, the carry out of bit1
    // into bit0 and the carry out of bit0

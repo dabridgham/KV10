@@ -1,26 +1,26 @@
 ICOPTS = -DSIM -Wall -Wno-implicit-dimensions -g2012
 SIMOPTS = -N
-INCLUDES =  alu.vh constants.vh disasm.vh functions.vh io.vh opcodes.vh
+INCLUDES =  alu.svh constants.svh disasm.svh functions.svh io.svh opcodes.svh
 LINTOPTS = --lint-only -Wno-LITENDIAN -DLINT
 
 ALL: alu.check apr.check sram.check mem-sram.check mem.check pag.check cache.check
 
 ver:
-	verilator $(LINTOPTS) --top-module apr_tb tb-apr.v apr.v barrel.v pag.sv
+	verilator $(LINTOPTS) --top-module apr_tb tb-apr.sv apr.sv barrel.sv pag.sv
 #	verilator $(LINTOPTS) apr.v barrel.v
 #	verilator $(LINTOPTS) pag.sv
 
 apr.check: apr.v alu.v barrel.v $(INCLUDES)
-	iverilog -tnull $(ICOPTS) apr.v alu.v decode.v barrel.v
+	iverilog -tnull $(ICOPTS) apr.sv alu.sv decode.sv barrel.sv
 alu.check: alu.v alu.vh barrel.v
-	iverilog -tnull $(ICOPTS) alu.v barrel.v
+	iverilog -tnull $(ICOPTS) alu.sv barrel.sv
 pag.check: pag.sv $(INCLUDES)
 
-tb-apr.vvp: Makefile kv10.hex tb-apr.v apr.v alu.v barrel.v mem.v decode.v pag.sv $(INCLUDES)
-	iverilog $(ICOPTS) -o tb-apr.vvp tb-apr.v apr.v alu.v barrel.v mem.v decode.v pag.sv
+tb-apr.vvp: Makefile kv10.hex tb-apr.sv apr.sv alu.sv barrel.sv mem.sv decode.sv pag.sv $(INCLUDES)
+	iverilog $(ICOPTS) -o tb-apr.vvp tb-apr.sv apr.sv alu.sv barrel.sv mem.sv decode.sv pag.sv
 
-tb-alu.vvp: tb-alu.v alu.v barrel.v alu.vh
-	iverilog -o tb-alu.vvp tb-alu.v alu.v barrel.v
+tb-alu.vvp: tb-alu.v alu.sv barrel.sv alu.svh
+	iverilog -o tb-alu.vvp tb-alu.sv alu.sv barrel.sv
 
 tb-alu.lxt: tb-alu.vvp
 	./tb-alu.vvp
@@ -30,9 +30,6 @@ test.alu: tb-alu.lxt
 
 kv10.hex: kv10.asm kv10.def
 	uas kv10.def kv10.asm kv10.hex kv10.lst
-
-save:
-	cp -a Makefile *.v *.vh saved
 
 test: test.aa test.ab test.ac test.ad test.ae test.af test.ag test.ai test.aj test.ak test.al test.am
 
@@ -69,8 +66,8 @@ test.qa: tb-apr.vvp
 KV10-PRM.pdf: KV10-PRM.tex
 	pdflatex KV10-PRM.tex
 
-.SUFFIXES: .v .check
+.SUFFIXES: .sv .check
 
 # Test compile to check for error
-.v.check:
+.sv.check:
 	iverilog -tnull $(ICOPTS) $<

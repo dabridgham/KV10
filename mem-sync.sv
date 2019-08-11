@@ -5,7 +5,7 @@
 // 2013-02-01 dab	initial version
 // 2014-01-01 dab	work on the posedge and get wait_time to work right
 
-`include "constants.vh"
+`include "constants.svh"
 
 module mem
   (
