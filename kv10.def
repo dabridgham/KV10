@@ -81,8 +81,8 @@ usaveflags 	none	30	1	bit	none
 alucmd		none	24	6	ord	none
 asel		none	20	4	ord	none
 msel		none	16	4	ord	none
-ubranch		jump	11	5	ord	lbl
-literal		none	0	11	lit	none
+ubranch		jump	11	5	ord	none
+literal		none	0	11	lit	lbl
 
 .
 
