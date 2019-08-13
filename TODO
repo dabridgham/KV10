@@ -59,7 +59,7 @@
  o The PC input to the Amux could easily be removed.  Could get rid of ACswap as it's only
    used for BLT and would only add one cycle each time around the loop.
  
- o Handle NXD.
+ o Handle NXD.  Test NXD.
 
  o Make sure cycles and instruction_count work when not in the simulator and make them
    readable from software.  Also, figure out some clever way to display the ratio without

@@ -47,14 +47,19 @@ module mem
       wait_count = 0;
    end
 
-   // hack for pushing the ack asynchronously so it's there a cycle earlier than the data.
+   // hack for pushing the acks immediately so they're there a cycle earlier than the data.
    // only works if wait_time is 0.
+//`define IACK 1
+`ifdef IACK
    always @(*) read_ack = mem_read;
    always @(*) write_ack = mem_write;
+`endif
 
    always @(posedge clk) begin
-//      write_ack <= 0;
-//      read_ack <= 0;
+`ifndef IACK
+      write_ack <= 0;
+      read_ack <= 0;
+`endif
 
       if (wait_count != 0)
 	wait_count <= wait_count - 1;
@@ -75,7 +80,9 @@ module mem
 	    $display("   [%06o] <-- %06o,%06o", saved_addr, saved_write_data[0:17], saved_write_data[18:35]);
 `endif
 	    ram[saved_addr] <= saved_write_data;
-//	    write_ack <= 1;
+`ifndef IACK
+	    write_ack <= 1;
+`endif
 	    write_ip <= 0;
 	 end
 	   
@@ -88,7 +95,9 @@ module mem
 	       $display("   <-- [%06o]", mem_addr);
 `endif
 	       mem_read_data <= ram[mem_addr];
-//	      read_ack <= 1;
+`ifndef IACK
+	      read_ack <= 1;
+`endif
 	       rw_done <= 0;
 	    end else begin
 	       saved_addr <= mem_addr;
@@ -104,7 +113,9 @@ module mem
 	       $display("   [%06o] <-- %06o,%06o", mem_addr, mem_write_data[0:17], mem_write_data[18:35]);
 `endif
 	       ram[mem_addr] <= mem_write_data;
-//	      write_ack <= 1;
+`ifndef IACK
+	      write_ack <= 1;
+`endif
 	       rw_done <= 0;
 	    end else begin
 	       saved_addr <= mem_addr;

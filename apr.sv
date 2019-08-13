@@ -8,15 +8,17 @@
 `include "constants.svh"
 `include "alu.svh"
 
-typedef bit [`ADDR] addr;	// these typdefs needs to move to a header file !!!
+typedef bit [`ADDR] addr;	// gotta figure out how to move these to a header file !!!
 typedef bit [`WORD] word;
+typedef bit [`HWORD] hword;
+typedef bit [`DEVICE] device;
 
 
 module apr
   (
    input 	    clk,
    input 	    reset,
-   // interface to memory and I/O
+   // interface to memory
    output [`ADDR]   mem_addr,
    output reg 	    mem_user, // selects user or exec memory
    input [`WORD]    mem_read_data,
@@ -62,14 +64,15 @@ module apr
    wire [1:7] 	      pi_hr = pi_trap | pi_error | io_pi_req; // hardware request
    wire [1:7] 	      pi_rq = pi_sr | (pi_le & pi_hr); // interrupt request - software requests
  						       // happen even if the level enable is off
-   reg [`ADDR] 	      pi_vector; // Vector Address for the current interrupt level
+   addr 	      pi_vector; // Vector Address for the current interrupt level
    reg 		      interrupt_instruction; // set while executing an interrupt instruction
    reg 		      start_interrupt;
    reg 		      dismiss_interrupt, clr_ii, clr_user;
    wire 	      udisint;		 // dismiss interrupt from the uengine
    wire		      interrupt_request; // signals when there's an interrupt request higher
 					 // than the current level in-progress
-   wire [`WORD] pi_status = { 11'b0, pi_sr, 3'b0, pi_ip, pi_ge, pi_le }; // PI status word for CONI
+   word pi_status;
+   assign pi_status = { 11'b0, pi_sr, 3'b0, pi_ip, pi_ge, pi_le }; // PI status word for CONI
    
    
    task RESET_PI;
@@ -438,241 +441,30 @@ module apr
    //
 
    // Fast Accumulators
-   reg [`WORD] 	      accumulators [0:'o17];
-   reg 		      AC_write;
-
-`ifdef SIM
-   initial begin
-      accumulators[0] = 'o070707_707070;
-      accumulators[1] = 'o070707_707070;
-      accumulators[2] = 'o070707_707070;
-      accumulators[3] = 'o070707_707070;
-      accumulators[4] = 'o070707_707070;
-      accumulators[5] = 'o070707_707070;
-      accumulators[6] = 'o070707_707070;
-      accumulators[7] = 'o070707_707070;
-      accumulators[8] = 'o070707_707070;
-      accumulators[9] = 'o070707_707070;
-      accumulators[10] = 'o070707_707070;
-      accumulators[11] = 'o070707_707070;
-      accumulators[12] = 'o070707_707070;
-      accumulators[13] = 'o070707_707070;
-      accumulators[14] = 'o070707_707070;
-      accumulators[15] = 'o070707_707070;
-   end
-`endif   
-
-   // dual-port, synchronous write
-   always @(posedge clk) begin
-      if (AC_write)
-	accumulators[ACsel] <= write_data;
-      if (mem_write && isAC(mem_addr))       // XCTR needs to be able to turn this off sometimes !!!
-	accumulators[mem_addr[32:35]] <= write_data;
-   end
-   // dual-port, asynchronous read
-   wire [`WORD]       AC = accumulators[ACsel];
-`ifdef NOTDEF
-   wire [`WORD]       AC_mem = accumulators[mem_addr[32:35]];
-`else
-   // when we read from the accumulators as if they're memory, do a synchronous read
-   reg [`WORD] 	      AC_mem;
-   always @(posedge clk)
-     if (mem_read)
-       AC_mem <= accumulators[mem_addr[32:35]];
-`endif
-
-   // An assortment of other registers in the micro-machine
-   reg [`WORD] 	      Breg;	// scratchpad for double-word operations
-   reg [`WORD] 	      Areg;	// scratchpad for the A leg of the ALU
-   reg [`WORD] 	      Mreg;	// scratchpad for the M leg of the ALU
-   reg [`ADDR] 	      PC;	// Program Counter
-   reg [0:12] 	      OpA;	// Op and A fields of the instruction
-   reg [13:17] 	      IX;	// I and X fields of the instruction
-   reg [18:35] 	      Y;	// Y field of the instruction
-   wire [`WORD]       inst = { OpA, IX, Y }; // put the whole instruction together
-   wire 	      Indirect = instI(inst);
-   wire [0:3] 	      X = instX(inst);
-   wire 	      Index = (X != 0);
-   wire [`ADDR]       E = Y;	       // Y is also used for E
-   wire [0:3] 	      A = instA(inst); // Pull out the A field
-   reg [0:5] 	      BP_P;	       // Position field of byte pointer
-   reg [0:5] 	      BP_S;	       // Size field of byte pointer
-   // write these registers under control of the micro-machine
-   reg 		      Breg_load, Areg_load, Mreg_load,
-		      OpA_load, IX_load, Y_load, BP_load,
-   		      PC_load;
-   wire 	      uPC_load;
-   always @(posedge clk) begin
-      if (Breg_load) Breg <= ALUresultlow;
-      
-      if (Areg_load) 
-	Areg <= write_data;
-      else if (mul_start)
-	Areg <= 0;		// a hack to save a state
-      
-      if (Mreg_load) Mreg <= write_data;
-      if (PC_load)
-	PC <= RIGHT(Amux);
-      if (OpA_load) OpA <= { instOP(write_data), instA(write_data) };
-      if (IX_load)
-	IX <= { instI(write_data), instX(write_data) };
-      if (Y_load) Y <= instY(write_data);
-      if (BP_load) { BP_P, BP_S } = { P(write_data), S(write_data) };
-   end
-
-   // A-leg mux to the ALU
-   wire [0:3] 	      Asel;	// set correct size !!!
-   reg [`WORD] 	      Amux;
-   wire [`ADDR]       PC_next = PC + 1;
-   wire [`ADDR]       PC_skip = PC + 2;
-   always @(*)
-     // numbers here must match those in kv10.def
-     case (Asel)
-       0: Amux =  `ZERO;
-       1: Amux = `ONE;
-       2: Amux = `MINUSONE;
-       3: Amux = `WORDSIZE'o254000_001000; // jrst 1000
-       4: Amux = {`WORDSIZE{Malu[0]}}; // sign-extend Malu
-       5: Amux = { `HALFZERO, pi_vector };
-       6: Amux = Areg;
-       7: Amux = { PSW, PC };
-       // This is just ugly.  JSR, JSP, PSA, and PUSHJ normally save the next PC.  However, when
-       // used as an interrupt instruction, they want to save the current PC.  Seems like there
-       // ought to be a more elegant way to get the right answer here.
-       8: Amux = { PSW, interrupt_instruction ? PC : PC_next };
-       9: Amux = { PSW, PC_skip };
-       10: Amux = AC;
-       11: Amux = { RIGHT(AC), LEFT(AC) };
-       12: Amux = bp_mask(BP_S);
-       13: Amux = Mreg;
-       14: Amux = { `HALFZERO, E };
-       15: Amux = { `XFILL, X };
-       default: Amux = AC;
-     endcase // case (Asel)
-
-   // M-leg mux to the ALU
-   wire [0:3] 	      Msel;	// set correct size !!!
-   reg [`WORD] 	      Mmux;
-   wire [`HWORD]      extP = { 12'b0, BP_P }; // byte position
-   wire [`HWORD]      extPneg = -extP;	      // for shifting bytes to the right
-   always @(*)
-     // numbers here must match those in kv10.def
-     case (Msel)
-       0: Mmux = Mreg;
-       1: Mmux = AC;
-       2: Mmux = { `HALFZERO, 12'b0, BP_P };
-       3: Mmux = { `HALFZERO, extPneg };
-       4: Mmux = { `HALFZERO, E };
-       5: Mmux = read_data;
-       6: Mmux = io_read_data;
-       7: Mmux = { OpA, 5'b0, Y }; // the instruction except for I and X
-       default: Mmux = AC;
-     endcase // case (Msel)
-
    // Select either A or A+1 for double word operations
    wire 	      ACnext; // driven from the micro-instruction
    wire [0:3] 	      ACsel = ACnext ? A + 1 : A;
-      
-   // some extra state to help with implementing multiply and divide
-   wire 	      mul_shift_set = NEGATIVE(Mmux) & Breg[35];
-   reg 		      mul_shift_bit;
-   wire 	      mul_shift_ctl = mul_shift_bit | mul_shift_set;
-   reg 		      mul_start;
-   always @(posedge clk)
-     if (reset || mul_start) begin
-	mul_shift_bit <= 0;
-     end else begin
-	if (mul_shift_set)
-	  mul_shift_bit <= 1;
-     end
-
-   // Wire in the ALU
-   reg [`aluCMD]      ALUcommand;
-   wire [`WORD]       ALUresultlow;
-   wire [`WORD]       ALUresult;
-   wire 	      ALUcarry0;
-   wire 	      ALUcarry1;
-   wire 	      ALUoverflow;
-   wire 	      ALUzero;
-   wire 	      Mswap;
-   wire [`WORD]       Malu = Mswap ? { RIGHT(Mmux), LEFT(Mmux) } : Mmux;
-   alu alu(ALUcommand, Breg, Amux, Malu, mul_shift_ctl, NEGATIVE(AC), ALUresultlow, ALUresult, 
-     ALUcarry0, ALUcarry1, ALUoverflow, ALUzero);
-   // rename the output of the ALU
-   wire [`WORD]       write_data = ALUresult;
-   // Send the output of the ALU to the write data lines for the memory and I/O
-   assign mem_write_data = write_data;
-   assign io_write_data = write_data;
-   // Pull the memory address off the A input to the ALU
-   assign mem_addr = RIGHT(Amux);
-
-   //
-   // Mux for Memory and ACs
-   //
-
-   // Control Signals Mux's
+   wire [`WORD]       write_data, AC, AC_mem;
    wire 	      mem_write, mem_read; // driven from the uinst
-   reg [`WORD] 	      read_data;
-   assign mem_mem_read = isAC(mem_addr) ? 0 : mem_read;
-   assign mem_mem_write = isAC(mem_addr) ? 0 : mem_write;
-
-   // The read_data mux selection is latched and read_data can show up a clock later
-   reg 		      is_ac;
-   always @(posedge clk)
-     if (mem_read || mem_write)
-       is_ac = isAC(mem_addr);
-   assign read_data = is_ac ? AC_mem : mem_read_data;
-
-   // The acks need to come through immediately but we also need to latch the mux in case they
-   // show up later
-   wire 	      ack_sel = (mem_read || mem_write) ? isAC(mem_addr) : is_ac;
-   wire 	      read_ack = ack_sel ? mem_read : mem_read_ack;
-   wire 	      write_ack = ack_sel ? mem_write : mem_write_ack;
-
-
-
-   // Compute a skip or jump condition looking at the ALU output.  This signal only makes
-   // sense when the ALU is performing a subtraction.
-   reg [0:2] condition_code;	// driven by the instruction decode ROM
-   reg 	     jump_condition;
-   always @(*)
-     case (condition_code) // synopsys full_case parallel_case
-       skip_never: jump_condition = 0;
-       skipl: jump_condition = !ALUzero & (ALUoverflow ^ NEGATIVE(ALUresult));
-       skipe: jump_condition = ALUzero;
-       skiple: jump_condition = ALUzero | (ALUoverflow ^ NEGATIVE(ALUresult));
-       skipa: jump_condition = 1;
-       skipge: jump_condition = ALUzero | !(ALUoverflow ^ NEGATIVE(ALUresult));
-       skipn: jump_condition = !ALUzero;
-       skipg: jump_condition = !ALUzero & !(ALUoverflow ^ NEGATIVE(ALUresult));
-     endcase
-   // Compute a skip or jump condition by comparing the ALU output to 0
-   reg 	     jump_condition_0;
-   always @(*)
-     case (condition_code) // synopsys full_case parallel_case
-       skip_never: jump_condition_0 = 0;
-       skipl: jump_condition_0 = NEGATIVE(ALUresult);
-       skipe: jump_condition_0 =  ALUzero;
-       skiple: jump_condition_0 = ALUzero | NEGATIVE(ALUresult);
-       skipa: jump_condition_0 = 1;
-       skipge: jump_condition_0 = ALUzero | !NEGATIVE(ALUresult);
-       skipn: jump_condition_0 = !ALUzero;
-       skipg: jump_condition_0 = !ALUzero &!NEGATIVE(ALUresult);
-     endcase
+      
+   reg 		      AC_write;
+   fast_ac fast_ac(clk, ACsel, AC, write_data, AC_write,
+		   mem_addr[32:35], AC_mem, write_data, mem_read, mem_write && isAC(mem_addr));
    
+
    //
    // Processor Status Word
    //
-   reg overflow, carry0, carry1, floating_overflow;
-   reg saved_overflow, saved_carry0, saved_carry1;
-   reg first_part_done, user, userIO, floating_underflow, no_divide;
-   reg set_flags, save_flags, clear_flags, set_overflow, set_pd_overflow;
-   reg clear_first_part_done, set_first_part_done, set_no_divide;
-   reg PSW_load;
-   wire set_user;
-   wire [`HWORD] PSW = { overflow, carry0, carry1, floating_overflow,
-			 first_part_done, user, userIO, 4'b0,
-			 floating_underflow, no_divide, 5'b0 };
+   reg 		      overflow, carry0, carry1, floating_overflow;
+   reg 		      saved_overflow, saved_carry0, saved_carry1;
+   reg 		      first_part_done, user, userIO, floating_underflow, no_divide;
+   reg 		      set_flags, save_flags, clear_flags, set_overflow, set_pd_overflow;
+   reg 		      clear_first_part_done, set_first_part_done, set_no_divide;
+   reg 		      PSW_load;
+   wire 	      set_user;
+   wire [`HWORD]      PSW = { overflow, carry0, carry1, floating_overflow,
+			      first_part_done, user, userIO, 4'b0,
+			      floating_underflow, no_divide, 5'b0 };
    always @(posedge clk) begin
       if (reset) begin
 	 overflow <= 0;
@@ -731,6 +523,189 @@ module apr
       end
    end
 
+
+   // An assortment of other registers in the micro-machine
+   reg [`WORD] 	      Breg;	// scratchpad for double-word operations
+   reg [`WORD] 	      Areg;	// scratchpad for the A leg of the ALU
+   reg [`WORD] 	      Mreg;	// scratchpad for the M leg of the ALU
+   reg [`ADDR] 	      PC;	// Program Counter
+   reg [0:12] 	      OpA;	// Op and A fields of the instruction
+   reg [13:17] 	      IX;	// I and X fields of the instruction
+   reg [18:35] 	      Y;	// Y field of the instruction
+   wire [`WORD]       inst = { OpA, IX, Y }; // put the whole instruction together
+   wire 	      Indirect = instI(inst);
+   wire [0:3] 	      X = instX(inst);
+   wire 	      Index = (X != 0);
+   wire [`ADDR]       E = Y;	       // Y is also used for E
+   wire [0:3] 	      A = instA(inst); // Pull out the A field
+   reg [0:5] 	      BP_P;	       // Position field of byte pointer
+   reg [0:5] 	      BP_S;	       // Size field of byte pointer
+   // write these registers under control of the micro-machine
+   reg 		      Breg_load, Areg_load, Mreg_load,
+		      OpA_load, IX_load, Y_load, BP_load,
+   		      PC_load;
+   wire 	      uPC_load;
+   always @(posedge clk) begin
+      if (Breg_load) Breg <= ALUresultlow;
+      
+      if (Areg_load) 
+	Areg <= write_data;
+      else if (mul_start)
+	Areg <= 0;		// a hack to save a state
+      
+      if (Mreg_load) Mreg <= write_data;
+      if (PC_load)
+	PC <= RIGHT(Amux);
+      if (OpA_load) OpA <= { instOP(write_data), instA(write_data) };
+      if (IX_load)
+	IX <= { instI(write_data), instX(write_data) };
+      if (Y_load) Y <= instY(write_data);
+      if (BP_load) { BP_P, BP_S } = { P(write_data), S(write_data) };
+   end
+
+   // A-leg mux to the ALU
+   wire [0:3] 	      Asel;	// set correct size !!!
+   reg [`WORD] 	      Amux;
+   wire [`ADDR]       PC_next = PC + 1;
+   wire [`ADDR]       PC_skip = PC + 2;
+
+   always @(*)
+     case (Asel)
+       // indexes here must match those in kv10.def
+       0: Amux = `ZERO;
+       1: Amux = `ONE;
+       2: Amux = `MINUSONE;
+       3: Amux = `WORDSIZE'o254000_001000; // jrst 1000
+       4: Amux = {`WORDSIZE{Malu[0]}}; // sign-extend Malu
+       5: Amux = { `HALFZERO, pi_vector };
+       6: Amux = Areg;
+       7: Amux = { PSW, PC };
+       // This is just ugly.  JSR, JSP, PSA, and PUSHJ normally save the next PC.  However, when
+       // used as an interrupt instruction, they want to save the current PC.  Seems like there
+       // ought to be a more elegant way to get the right answer here.
+       8: Amux = { PSW, interrupt_instruction ? PC : PC_next };
+       9: Amux = { PSW, PC_skip };
+       10: Amux = AC;
+       11: Amux = { RIGHT(AC), LEFT(AC) };
+       12: Amux = bp_mask(BP_S);
+       13: Amux = Mreg;
+       14: Amux = { `HALFZERO, E };
+       15: Amux = { `XFILL, X };
+     endcase
+
+   // M-leg mux to the ALU
+   wire [0:3] 	      Msel;	// set correct size !!!
+   reg [`WORD] 	      Mmux;
+   wire [`HWORD]      extP = { 12'b0, BP_P }; // byte position
+   wire [`HWORD]      extPneg = -extP;	      // for shifting bytes to the right
+   always @(*)
+     // numbers here must match those in kv10.def
+     case (Msel)
+       0: Mmux = Mreg;
+       1: Mmux = AC;
+       2: Mmux = { `HALFZERO, 12'b0, BP_P };
+       3: Mmux = { `HALFZERO, extPneg };
+       4: Mmux = { `HALFZERO, E };
+       5: Mmux = read_data;
+       6: Mmux = io_read_data;
+       7: Mmux = { OpA, 5'b0, Y }; // the instruction except for I and X
+       default: Mmux = AC;
+     endcase // case (Msel)
+
+   // some extra state to help with implementing multiply and divide
+   wire 	      mul_shift_set = NEGATIVE(Mmux) & Breg[35];
+   reg 		      mul_shift_bit;
+   wire 	      mul_shift_ctl = mul_shift_bit | mul_shift_set;
+   reg 		      mul_start;
+   always @(posedge clk)
+     if (reset || mul_start) begin
+	mul_shift_bit <= 0;
+     end else begin
+	if (mul_shift_set)
+	  mul_shift_bit <= 1;
+     end
+
+   // Wire in the ALU
+   reg [`aluCMD]      ALUcommand;
+   wire [`WORD]       ALUresultlow;
+   wire [`WORD]       ALUresult;
+   wire 	      ALUcarry0;
+   wire 	      ALUcarry1;
+   wire 	      ALUoverflow;
+   wire 	      ALUzero;
+   wire 	      Mswap;
+   wire [`WORD]       Malu = Mswap ? { RIGHT(Mmux), LEFT(Mmux) } : Mmux;
+   alu alu(ALUcommand, Breg, Amux, Malu, mul_shift_ctl, NEGATIVE(AC), ALUresultlow, ALUresult, 
+	   ALUcarry0, ALUcarry1, ALUoverflow, ALUzero);
+   // rename the output of the ALU
+   assign write_data = ALUresult;
+   // Send the output of the ALU to the write data lines for the memory and I/O
+   assign mem_write_data = write_data;
+   assign io_write_data = write_data;
+   // Pull the memory address off the A input to the ALU
+   assign mem_addr = RIGHT(Amux);
+
+   //
+   // Mux for Memory and ACs
+   //
+
+   // Control Signals Mux's
+   reg [`WORD] 	      read_data;
+   assign mem_mem_read = isAC(mem_addr) ? 0 : mem_read;
+   assign mem_mem_write = isAC(mem_addr) ? 0 : mem_write;
+
+   // The read_data mux selection is latched and read_data can show up a clock later
+   reg 		      is_ac;
+   always @(posedge clk)
+     if (mem_read || mem_write)
+       is_ac = isAC(mem_addr);
+   assign read_data = is_ac ? AC_mem : mem_read_data;
+
+`ifdef NOTDEF
+   // The acks need to come through immediately but we also need to latch the mux in case they
+   // show up later
+   wire 	      ack_sel = (mem_read || mem_write) ? isAC(mem_addr) : is_ac;
+   wire 	      read_ack = ack_sel ? mem_read : mem_read_ack;
+   wire 	      write_ack = ack_sel ? mem_write : mem_write_ack;
+`else
+   reg 		      read_ac_ack, write_ac_ack;
+   always @(posedge clk) read_ac_ack = isAC(mem_addr) && mem_read;
+   always @(posedge clk) write_ac_ack = isAC(mem_addr) && mem_write;
+
+   wire 	      read_ack = is_ac ? read_ac_ack : mem_read_ack;
+   wire 	      write_ack = is_ac ? write_ac_ack : mem_write_ack;
+`endif
+
+
+   // Compute a skip or jump condition looking at the ALU output.  This signal only makes
+   // sense when the ALU is performing a subtraction.
+   reg [0:2] 	      condition_code;	// driven by the instruction decode ROM
+   reg 		      jump_condition;
+   always @(*)
+     case (condition_code) // synopsys full_case parallel_case
+       skip_never: jump_condition = 0;
+       skipl: jump_condition = !ALUzero & (ALUoverflow ^ NEGATIVE(ALUresult));
+       skipe: jump_condition = ALUzero;
+       skiple: jump_condition = ALUzero | (ALUoverflow ^ NEGATIVE(ALUresult));
+       skipa: jump_condition = 1;
+       skipge: jump_condition = ALUzero | !(ALUoverflow ^ NEGATIVE(ALUresult));
+       skipn: jump_condition = !ALUzero;
+       skipg: jump_condition = !ALUzero & !(ALUoverflow ^ NEGATIVE(ALUresult));
+     endcase
+   // Compute a skip or jump condition by comparing the ALU output to 0
+   reg 		      jump_condition_0;
+   always @(*)
+     case (condition_code) // synopsys full_case parallel_case
+       skip_never: jump_condition_0 = 0;
+       skipl: jump_condition_0 = NEGATIVE(ALUresult);
+       skipe: jump_condition_0 =  ALUzero;
+       skiple: jump_condition_0 = ALUzero | NEGATIVE(ALUresult);
+       skipa: jump_condition_0 = 1;
+       skipge: jump_condition_0 = ALUzero | !NEGATIVE(ALUresult);
+       skipn: jump_condition_0 = !ALUzero;
+       skipg: jump_condition_0 = !ALUzero &!NEGATIVE(ALUresult);
+     endcase
+   
 
    // Most of the time, mem_user is just the user flag from the processor.  Exceptions are when
    // executing interrupt instructions or the instruction for an MOOU.  Then XCTR gets
@@ -822,12 +797,12 @@ module apr
    assign ALUcommand = uinst[29:24];
    assign Asel = uinst[23:20];
    assign Msel = uinst[19:16];
-   wire [4:0] ubranch_code = uinst[15:11];
+   wire [4:0]  ubranch_code = uinst[15:11];
    wire [10:0] unext = uinst[10:0]; // the next instruction location
 
-   reg [10:0] ucurr, uprev;	// current and previous micro-addresses, kept for debugging
-   reg [10:0] uaddr;
-   reg [10:0] ubranch;		// gets ORd with unext to get the next micro-address
+   reg [10:0]  ucurr, uprev;	// current and previous micro-addresses, kept for debugging
+   reg [10:0]  uaddr;
+   reg [10:0]  ubranch;		// gets ORd with unext to get the next micro-address
 
    uROM uROM(clk, uaddr, uinst);
 
@@ -858,9 +833,9 @@ module apr
    always @(posedge clk) begin
       ucurr <= uaddr;
       if (reset)
-	 uprev <= 11'ox;
+	uprev <= 11'ox;
       else
-	 uprev <= ucurr;
+	uprev <= ucurr;
    end
 
    always @(posedge clk) begin
@@ -875,12 +850,6 @@ module apr
       if (unext == 0) begin
 	 $display(" HALT!!!");
 	 $display("uEngine halt @%o from %o", uaddr, uprev);
-	 $display("Cycles: %0d  Instructions: %0d   Cycles/inst: %f",
-		  cycles, instruction_count, $itor(cycles)/$itor(instruction_count));
-	 $display("carry0: %b  carry1: %b  overflow: %b  floating overflow: %b",
-		  carry0, carry1, overflow, floating_overflow);
-	 $display("User: %b  UserIO: %b", user, userIO);
-	 print_ac();
 	 $finish_and_return(1);
       end
 `endif
@@ -900,29 +869,20 @@ module apr
 
 	// Memory Read - loop, waiting for read_ack.  Interrupts are handled directly by a hack
 	// in the micro-engine.
-	1: case (1'b1)
-//	     read_ack & interrupt_request & ~start_interrupt:	ubranch[1:0] = 3;
-	     read_ack:		ubranch[0] = 1;
-	     default:		ubranch[0] = 0;
-	   endcase // case (1'b1)
+	1: ubranch[0] = read_ack;
 
 	// mem write - loop, waiting for write_ack
-	2: case (1'b1)
-	     write_ack:		ubranch[0] = 1;
-	     default:		ubranch[0] = 0;
-	   endcase
+	2: ubranch[0] = write_ack;
 
-	// IX - a 3-way branch on index and indirect calculating the Effective Address.  this
-	// comes from write_data because the check happens before inst gets written
+	// IX - a 3-way branch on index and indirect calculating the Effective Address.
 	3: case (1'b1)
-	     instX(write_data) != 0: ubranch[1:0] = 0;
-	     instI(write_data): ubranch[1:0] = 1;
+	     Index: ubranch[1:0] = 0;
+	     Indirect: ubranch[1:0] = 1;
 	     default: ubranch[1:0] = 2;
 	   endcase
 
 	// Indirect - If the Effective Address calculation included an Index register, we need
-	// to then check if there's also an Indirect.  This happens after inst is written so
-	// take the Indirect bit from there.
+	// to then check if there's also an Indirect.
 	4: ubranch[0] = Indirect;
 
 	// Dispatch - This comes from the instruction decode.  By default it's just the
@@ -991,7 +951,7 @@ module apr
    // The disassembler
    //
 
-`include "disasm.svh"
+ `include "disasm.svh"
 
    // I need to pull out the cycle and instruction count so they work when I'm not in the
    // simulator too. !!!
@@ -1019,17 +979,15 @@ module apr
 	 
 	 // this is a horrible hack but it's really handy for running a bunch of
 	 // tests and DaveC's tests all loop back to 001000 !!!
-	 if ((PC == `ADDRSIZE'o1000) && (instruction_count != 0)) begin
-	    $display("Cycles: %0d  Instructions: %0d   Cycles/inst: %f",
-		     cycles, instruction_count, $itor(cycles)/$itor(instruction_count));
-	    $finish_and_return(0);
-	 end
+	 if ((PC == `ADDRSIZE'o1000) && (instruction_count != 0))
+	   $finish_and_return(0);
 
 	 // disassembler
 	 $display("%6o: %6o,%6o %s", read_addr, write_data[0:17], write_data[18:35], disasm(write_data));
       end // if (OpA_load)
 
-`ifdef NOTDEF
+ `ifdef NOTDEF
+      // it might be nice to figure out how to make this work again !!!
       if (ubranch_code == 4) begin	// dispatch
 	 if (instX(inst) || instI(inst))
 	   $write(" @%6o", E);
@@ -1043,8 +1001,24 @@ module apr
 	   $write(" [%6o]", E);
 	 $display("");		// newline
       end // if (ubranch_code == 4)
-`endif //  `ifdef NOTDEF
+ `endif //  `ifdef NOTDEF
    end
+
+   // print out state and stats when we're done
+   final begin
+      $display("Cycles: %0d  Instructions: %0d   Cycles/inst: %f",
+	       cycles, instruction_count, $itor(cycles)/$itor(instruction_count));
+      $display("carry0: %b  carry1: %b  overflow: %b  floating overflow: %b",
+	       carry0, carry1, overflow, floating_overflow);
+      $display("User: %b  UserIO: %b", user, userIO);
+   end
+
+ `ifdef NOTDEF
+   // this happens so rarely.  need to investigate if I can collapse the two checks into one !!!
+   always @(posedge clk)
+     if (jump_condition != jump_condition_0)
+       $display("!!! Jump conditions different !!!");
+ `endif
 
 `endif
    
@@ -1054,13 +1028,11 @@ module apr
    // Instruction Decode ROM
    //
 
-   reg ReadE;			// the instruction reads the value from E
    wire dReadE;			// from the decode ROM
    wire [0:8] dispatch;		// main instruction branch in the micro-code
-   wire int_jump;		// interrupt instruction is special as a jump
-   wire int_skip;		// interrupt instruction is special as a skip
-   wire [`WORD] dinst = OpA_load ? write_data : inst;
-   decode decode(.inst(dinst),
+   wire       int_jump;		// interrupt instruction is special as a jump
+   wire       int_skip;		// interrupt instruction is special as a skip
+   decode decode(.inst(inst),
 		 .user(user),
 		 .userIO(userIO),
 		 .dispatch(dispatch),
@@ -1071,17 +1043,97 @@ module apr
 		 .int_jump(int_jump),
 		 .int_skip(int_skip),
 		 .xct(dXCT));
+
+   reg 	      have_dispatched = 0;	// set once we've dispatched so we don't read E again
+   wire       ReadE = dReadE & ~have_dispatched; // the instruction reads the value from E
    always @(posedge clk) begin
       // After we read E, clear the flag so we can dispatch again and not read E again
-      if (ubranch_code == 5)	// dispatch
-	ReadE <= 0;
+      if (ubranch_code == 5)	// brDISPATCH
+	have_dispatched <= 1;
       // grab ReadE from the decode ROM but into a register that we can clear once we read E
       else if (OpA_load)
-	ReadE <= dReadE;
+	have_dispatched <= 0;
    end
 
 
 endmodule // APR
+
+
+// Fast Accumulators
+module fast_ac
+  (input       clk,
+   input [0:3] 	      ACsel,
+   output [`WORD]     AC,
+   input [`WORD]      ac_write_data,
+   input 	      AC_write,
+   input [0:3] 	      mem_addr,
+   output reg [`WORD] AC_mem,
+   input [`WORD]      mem_write_data,
+   input 	      mem_read,
+   input 	      mem_write);
+   
+   reg [`WORD] 	      accumulators [0:'o17];
+
+   // dual-port, synchronous write
+   always @(posedge clk)
+     if (AC_write)
+       accumulators[ACsel] <= ac_write_data;
+   always @(posedge clk)
+     if (mem_write)       // XCTR needs to be able to turn this off sometimes !!!
+       accumulators[mem_addr] <= mem_write_data;
+
+   // asynchronous read for the AC
+   assign AC = accumulators[ACsel];
+   // when we read from the accumulators as if they're memory, do a synchronous read
+   always @(posedge clk)
+     if (mem_read)
+       AC_mem <= accumulators[mem_addr];
+
+`ifdef SIM
+   initial begin
+      accumulators[0] = 'o070707_707070;
+      accumulators[1] = 'o070707_707070;
+      accumulators[2] = 'o070707_707070;
+      accumulators[3] = 'o070707_707070;
+      accumulators[4] = 'o070707_707070;
+      accumulators[5] = 'o070707_707070;
+      accumulators[6] = 'o070707_707070;
+      accumulators[7] = 'o070707_707070;
+      accumulators[8] = 'o070707_707070;
+      accumulators[9] = 'o070707_707070;
+      accumulators[10] = 'o070707_707070;
+      accumulators[11] = 'o070707_707070;
+      accumulators[12] = 'o070707_707070;
+      accumulators[13] = 'o070707_707070;
+      accumulators[14] = 'o070707_707070;
+      accumulators[15] = 'o070707_707070;
+   end
+
+   final begin
+      $display("0: %o,%o  4: %o,%o  10: %o,%o  14: %o,%o",
+	       accumulators[0][0:17], accumulators[0][18:35],
+	       accumulators[4][0:17], accumulators[4][18:35],
+	       accumulators[8][0:17], accumulators[8][18:35],
+	       accumulators[12][0:17], accumulators[12][18:35]);
+      $display("1: %o,%o  5: %o,%o  11: %o,%o  15: %o,%o",
+	       accumulators[1][0:17], accumulators[1][18:35],
+	       accumulators[5][0:17], accumulators[5][18:35],
+	       accumulators[9][0:17], accumulators[9][18:35],
+	       accumulators[13][0:17], accumulators[13][18:35]);
+      $display("2: %o,%o  6: %o,%o  12: %o,%o  16: %o,%o",
+	       accumulators[2][0:17], accumulators[2][18:35],
+	       accumulators[6][0:17], accumulators[6][18:35],
+	       accumulators[10][0:17], accumulators[10][18:35],
+	       accumulators[14][0:17], accumulators[14][18:35]);
+      $display("3: %o,%o  7: %o,%o  13: %o,%o  17: %o,%o",
+	       accumulators[3][0:17], accumulators[3][18:35],
+	       accumulators[7][0:17], accumulators[7][18:35],
+	       accumulators[11][0:17], accumulators[11][18:35],
+	       accumulators[15][0:17], accumulators[15][18:35]);
+   end // final begin
+`endif
+
+endmodule // fast_ac
 
 
 // ROM for the Microcode

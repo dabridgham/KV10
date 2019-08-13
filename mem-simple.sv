@@ -25,17 +25,31 @@ module mem
       $readmemh("dgcaa.mif", ram);
    end
 
-   // hack for pushing the ack asynchronously so it's there a cycle earlier than the data.
-   // only works if wait_time is 0.
+`ifdef IACK
+   // push the acks immediately so they're there a cycle earlier than the data.
    always @(*) read_ack = mem_read;
    always @(*) write_ack = mem_write;
+`endif
 
    always @(posedge clk) begin
-      if (mem_read)
-	mem_read_data <= ram[mem_addr];
+`ifndef IACK
+      read_ack <= 0;
+      write_ack <= 0;
+`endif
 
-      if (mem_write)
-	ram[mem_addr] <= mem_write_data;
+      if (mem_read) begin
+	 mem_read_data <= ram[mem_addr];
+`ifndef IACK
+	 read_ack <= 1;
+`endif
+      end
+
+      if (mem_write) begin
+	 ram[mem_addr] <= mem_write_data;
+`ifndef IACK
+	 write_ack <= 1;
+`endif
+      end
    end
 
 endmodule // mem

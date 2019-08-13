@@ -1,18 +1,19 @@
 ICOPTS = -DSIM -Wall -Wno-implicit-dimensions -g2012
 SIMOPTS = -N
-INCLUDES =  alu.svh constants.svh disasm.svh functions.svh io.svh opcodes.svh
+INCLUDES = alu.svh constants.svh disasm.svh functions.svh io.svh opcodes.svh
 LINTOPTS = --lint-only -Wno-LITENDIAN -DLINT
 
-ALL: alu.check apr.check sram.check mem-sram.check mem.check pag.check cache.check
+
+check: alu.check apr.check sram.check mem-sram.check mem.check pag.check cache.check
 
 ver:
 	verilator $(LINTOPTS) --top-module apr_tb tb-apr.sv apr.sv barrel.sv pag.sv
 #	verilator $(LINTOPTS) apr.v barrel.v
 #	verilator $(LINTOPTS) pag.sv
 
-apr.check: apr.v alu.v barrel.v $(INCLUDES)
+apr.check: apr.sv alu.sv barrel.sv $(INCLUDES)
 	iverilog -tnull $(ICOPTS) apr.sv alu.sv decode.sv barrel.sv
-alu.check: alu.v alu.vh barrel.v
+alu.check: alu.sv alu.svh barrel.sv
 	iverilog -tnull $(ICOPTS) alu.sv barrel.sv
 pag.check: pag.sv $(INCLUDES)
 

@@ -430,9 +430,7 @@ module pag
 	     if (PT_AGE(saved_mem_addr, pmem_read_data)) begin
 		pag_addr = saved_pte_addr;
 		pag_write_data = PT_CLEAR_AGE(saved_mem_addr, pmem_read_data);
-`ifndef LINT
 		pag_write = 1;
-`endif
 		if (pmem_write_ack) set_state(FINISH);
 		else set_state(PTE_WRITE_WAIT);
 	     end else
@@ -464,9 +462,9 @@ module pag
 	     else
 	       pag_addr = { PT_PPN(saved_mem_addr, saved_pte), saved_mem_addr[`VPAGE_INDX] };
 	     if (saved_mem_read) begin
-`ifndef LINT
+//`ifndef LINT
 		pag_read = 1;
-`endif
+//`endif
 		if (pmem_read_ack) begin
 		   pag_read_ack = 1;
 		   set_state(IDLE);
@@ -474,9 +472,9 @@ module pag
 		  set_state(FINISH_WAIT);
 	     end else if (saved_mem_write) begin
 		pag_write_data = saved_mem_write_data;
-`ifndef LINT
+//`ifndef LINT
 		pag_write = 1;
-`endif
+//`endif
 		if (pmem_write_ack) begin
 		   pag_write_ack = 1;
 		   set_state(IDLE);
