@@ -19,7 +19,8 @@ module mem
    output reg  	      write_ack
    );
 
-   reg [`WORD] 	      ram[0:2**`PADDRSIZE-1];
+//   reg [`WORD] 	      ram[0:2**`PADDRSIZE-1];
+   reg [`WORD] 	      ram[0:2**14-1]; // fit into the Block RAM in the FPGA
 
    initial begin
       $readmemh("dgcaa.mif", ram);
