@@ -59,8 +59,7 @@ module apr_tb();
    wire 	  io_write;
    wire [1:7] 	  io_pi_in;
 
-   wire [`ADDR]   display_addr;
-   wire 	  running;
+   wire [`WORD]   d1, d2, d3, d4;
 
    reg 		  reset = 0;
    reg 		  clk = 1;
@@ -84,7 +83,7 @@ module apr_tb();
 	   apr_write_ack, apr_read_ack, apr_page_fail, 
 	   apr_io_dev, apr_io_cond, apr_io_read_data, apr_io_write_data,
 	   apr_io_read, apr_io_write, apr_io_read_ack, apr_io_write_ack, apr_nxd, apr_pi,
-	   display_addr, running);
+	   d1, d2, d3, d4);
 
 `define PAG 1
 `ifdef PAG
