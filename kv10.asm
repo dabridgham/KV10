@@ -1216,14 +1216,14 @@ blt:	mAC,swapM,aluSETM,loadA			bltst ; BLT : move LEFT(AC) to A
 	aAC,mM,swapM,brTEST,aluIOR,writeAC	testn ; TSON
 ;;; 1700
 	;; I/O Instructions are dispatched here
-	jump	MUUO			      ; BLKI (need to implement !!!)
-	readIO,brIOREAD			rdio  ; DATAI : C(E) <- Device Data
-	jump	MUUO			      ; BLKO (need to implement !!!)
-	mM,aluSETM,writeIO,brIOWRITE	wrio  ; DATAO : Device Data <- C(E)
-	mE,aluSETM,writeIO,brIOWRITE	wrio  ; CONO  : Device Cond <- 0,E
-	readIO,brIOREAD			rdio  ; CONI  : C(E) <- Device Cond
-	readIO,brIOREAD			consz ; CONSZ : E & Cond, Skip if 0
-	readIO,brIOREAD			conso ; CONSO : E | Cond, Skip if not 0
+	jump	MUUO		      ; BLKI (need to implement !!!)
+	readIO			rdio  ; DATAI : C(E) <- Device Data
+	jump	MUUO		      ; BLKO (need to implement !!!)
+	mM,aluSETM,writeIO	wrio  ; DATAO : Device Data <- C(E)
+	mE,aluSETM,writeIO	wrio  ; CONO  : Device Cond <- 0,E
+	readIO			rdio  ; CONI  : C(E) <- Device Cond
+	readIO			consz ; CONSZ : E & Cond, Skip if 0
+	readIO			conso ; CONSO : E | Cond, Skip if not 0
 ;;; 1710
 	;; If an I/O instruction is executed in User mode without UserIO set
 userio:	jump	MUUO
@@ -1274,8 +1274,8 @@ wrio:	brIOWRITE	.
 	jump	nxd
 	halt
 	;; Finish up an I/O read
-rdio:	brIOREAD	.
-	aE,mIO,aluSETM,loadM,writeMEM,memD1,brWRITE	wrmem1 ; write data to memory
+rdio:	mIO,aluSETM,loadM,brIOREAD	.	       ; M <- IO read data
+	aE,mM,aluSETM,writeMEM,memD1,brWRITE	wrmem1 ; write data to memory
 	jump	nxd
 	halt
 ;;; 1760
