@@ -128,6 +128,7 @@ module alu
       overflow = 0;
       shift_arith = 0;
       shift_rotate = 0;
+      shift72_in = { A, Alow };
       
       // verilator lint_off CASEINCOMPLETE
       case (command)		// synopsys full_case parallel_case
@@ -210,7 +211,6 @@ module alu
 	  begin
 	     shift_rotate = 0;
 	     shift_arith = 0;
-	     shift72_in = { A, Alow };
 	     result = DLEFT(shift72_out);
 	     resultlow = DRIGHT(shift72_out);
 	  end
@@ -219,7 +219,6 @@ module alu
 	  begin
 	     shift_rotate = 1;
 	     shift_arith = 0;
-	     shift72_in = { A, Alow };
 	     result = DLEFT(shift72_out);
 	     resultlow = DRIGHT(shift72_out);
 	  end
