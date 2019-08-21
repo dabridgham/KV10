@@ -60,32 +60,6 @@ module pag
    assign pi_out = pi_in;
 
 
-   //
-   // The PAG I/O device
-   //
-
-   // I/O Control Line Mux
-   always @(*) begin
-      case ({apr_io_dev, apr_io_cond})
-	// these are the devices we grab locally
-	IO_DATA(PAG+0), IO_DATA(PAG+1), IO_DATA(PAG+2), IO_DATA(PAG+3),
-	IO_DATA(PAG+4), IO_DATA(PAG+5), IO_DATA(PAG+6), IO_DATA(PAG+7),
-	IO_COND(PAG+0):
-	  begin
-	     apr_io_read_ack = io_read; // all registers read and write on the next clock
-	     apr_io_write_ack = io_write;
-	     apr_nxd = 0;
-	  end
-	default:
-	  begin
-	     // everything else, pass through
-	     apr_nxd = pmem_nxd;;
-	     apr_io_read_ack = 0; // needs to be added !!!
-	     apr_io_write_ack = 0; // needs to be added !!!
-	  end
-      endcase // case ({io_dev, io_cond})
-   end
-
    reg 		      pag_enable = 0; // Enable Paging
    reg 		      pag_hm = 1,     // highest moby
 		      pag_re = 1;     // ROM enable (not implemented !!!)
@@ -116,25 +90,53 @@ module pag
    localparam			// protection code values
      no_access = 2'o0,		// read is allowed for 1, 2, or 3
      write_access = 2'o3;
+
+
+   //
+   // The PAG I/O device
+   //
+
+   // Internal I/O Control Line Mux
+   reg pag_io_read_ack, pag_io_write_ack;
+   reg [`WORD] pag_io_read_data;
+   reg pmem_io_read_ack = 0, pmem_io_write_ack = 0; // these need to move to the module interface !!!
+   reg [`WORD] pmem_io_read_data; // needs to move to the module interface !!!
+   always @(*) 
+     if (pag_io_read_ack || pag_io_write_ack) begin
+	apr_io_read_ack = pag_io_read_ack;
+	apr_io_write_ack = pag_io_write_ack;
+	apr_io_read_data = pag_io_read_data;
+	apr_nxd = 0;
+     end else begin
+	apr_io_read_ack = pmem_io_read_ack;
+	apr_io_write_ack = pmem_io_write_ack;
+	apr_io_read_data = pmem_io_read_data;
+	apr_nxd = pmem_nxd;
+     end	
    
    // I/O Read
    always @(posedge clk)
-     if (io_read)
-       case ({apr_io_dev, apr_io_cond})
-	 IO_COND(PAG+0): apr_io_read_data <= { 28'b0, pag_hm, pag_enable, pag_re, 5'b0 };
-	 IO_DATA(PAG+0): apr_io_read_data <= pag_last_error;
-	 IO_DATA(PAG+1): apr_io_read_data <= `ZERO;
-	 IO_DATA(PAG+2): apr_io_read_data <= { ac_block_enable, 13'b0, ac_block_base, 4'b0 };
-	 IO_DATA(PAG+3): apr_io_read_data <= { `HALFZERO, quantum_timer };
-	 IO_DATA(PAG+4): apr_io_read_data <= { 14'b0, pt_elb, 6'b0 };
-	 IO_DATA(PAG+5): apr_io_read_data <= { 14'b0, pt_ehb, 6'b0 };
-	 IO_DATA(PAG+6): apr_io_read_data <= { 14'b0, pt_ulb, 6'b0 };
-	 IO_DATA(PAG+7): apr_io_read_data <= { 14'b0, pt_uhb, 6'b0 };
-       endcase // case ({apr_io_dev, apr_io_cond})
+     if (io_read) begin
+	pag_io_read_ack = 1;
+	case ({apr_io_dev, apr_io_cond})
+	  IO_COND(PAG+0): pag_io_read_data <= { 28'b0, pag_hm, pag_enable, pag_re, 5'b0 };
+	  IO_DATA(PAG+0): pag_io_read_data <= pag_last_error;
+	  IO_DATA(PAG+1): pag_io_read_data <= `ZERO;
+	  IO_DATA(PAG+2): pag_io_read_data <= { ac_block_enable, 13'b0, ac_block_base, 4'b0 };
+	  IO_DATA(PAG+3): pag_io_read_data <= { `HALFZERO, quantum_timer };
+	  IO_DATA(PAG+4): pag_io_read_data <= { 14'b0, pt_elb, 6'b0 };
+	  IO_DATA(PAG+5): pag_io_read_data <= { 14'b0, pt_ehb, 6'b0 };
+	  IO_DATA(PAG+6): pag_io_read_data <= { 14'b0, pt_ulb, 6'b0 };
+	  IO_DATA(PAG+7): pag_io_read_data <= { 14'b0, pt_uhb, 6'b0 };
+	  default: pag_io_read_ack = 0;
+	endcase // case ({apr_io_dev, apr_io_cond})
+     end
 
    // I/O Write
    wire [`ADDR]       invalidate_address = RIGHT(apr_io_write_data);
    always @(posedge clk) begin
+      pag_io_write_ack = 0;
+
       // bulk invalidating the cache is handled here too
       if (invalidate_exec) begin
 	 exec_prot[invalidate_exec_count] <= no_access;
@@ -160,6 +162,12 @@ module pag
 	end
 
 
+      // if we get a page fail, save the error information
+      if (page_fail)
+	pag_last_error <= { saved_mem_write, saved_mem_user, PT_PROT(saved_mem_addr, pmem_read_data),
+			    14'b0, saved_mem_addr};
+
+
       if (reset) begin
 	 pag_enable <= 0;
 	 pag_hm <= 1;
@@ -177,6 +185,8 @@ module pag
 	 invalidate_exec_count <= 0;
 	 invalidate_user_count <= 0;
       end else if (io_write)
+	pag_io_write_ack = 1;
+      
 	case ({apr_io_dev, apr_io_cond})
 	  IO_COND(PAG+0): { pag_hm, pag_enable, pag_re } <= apr_io_write_data[28:30];
 	  IO_DATA(PAG+0): pag_last_error <= apr_io_write_data;
@@ -197,6 +207,7 @@ module pag
 	  IO_DATA(PAG+5): { pt_ehb, invalidate_exec } <= { apr_io_write_data[14:29], 1'b1 };
 	  IO_DATA(PAG+6): { pt_ulb, invalidate_user } <= { apr_io_write_data[14:29], 1'b1 };
 	  IO_DATA(PAG+7): { pt_uhb, invalidate_user } <= { apr_io_write_data[14:29], 1'b1 };
+	  default: pag_io_write_ack = 0;
 	endcase // case ({apr_io_dev, apr_io_cond})
    end
    
@@ -365,11 +376,6 @@ module pag
    reg [`WORD] 	saved_pte;
    always @(posedge clk) if (save_pte) saved_pte <= pmem_read_data;
 
-   // if we get a page fail, save the error information
-   always @(posedge clk)
-     if (page_fail)
-       pag_last_error <= { saved_mem_write, saved_mem_user, PT_PROT(saved_mem_addr, pmem_read_data),
-			   14'b0, saved_mem_addr};
 	
    // the state-machine logic
    always @(*) begin
