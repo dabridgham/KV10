@@ -69,3 +69,6 @@
    one.  Also, make sure it works without a console ... somehow.
 
  o Design the indicator panels and write the Verilog to support them.
+
+ o Write diagnostic to check that DPB and IDPB work with indexing and indirect.
+ 
