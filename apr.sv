@@ -359,7 +359,7 @@ module apr
    reg 	      XCTR;		// set while XCTR is executing an instruction
    wire       dXCT;		// driven by the instruction decode
    reg [0:3]  mem_access;	// latched from A when we find out it's an XCTR instruction
-   reg 	      XCTRI;		// latched from A[0]
+   reg 	      XCTRI;		// latched from A[0] (This is never used!!!)
 
    always @(posedge clk)
      if (reset) begin
