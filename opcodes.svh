@@ -528,7 +528,7 @@ localparam TSON = 9'o677;
 // 700240         CONI    Conditions in, 36 bits device to AC
 // 700300         CONSZ   Conditions, Skip if Zero (test 18 bits)
 // 700340         CONSO   Conditions, Skip if One (test 18 bits)
-localparam IO_INSTRUCTION = 9'o7xx;
+localparam IO_INSTRUCTION = 9'o7??;
 
 localparam
   BLKI = 3'o0,

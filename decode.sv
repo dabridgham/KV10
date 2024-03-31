@@ -42,9 +42,7 @@ module decode
       int_skip = no;
       xct = no;
 
-      // verilator lint_off CASEX
-      // Turn off this verilator flag and fix this !!!
-      casex (instOP(inst))	// synopsys full_case parallel_case
+      casez (instOP(inst))	// synopsys full_case parallel_case
 
 	LUUO01, LUUO02, LUUO03, LUUO04, LUUO05, LUUO06, LUUO07,
 	LUUO10, LUUO11, LUUO12, LUUO13, LUUO14, LUUO15, LUUO16, LUUO17,
