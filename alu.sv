@@ -156,15 +156,8 @@ module alu
 	`aluSETO:	result = `MINUSONE;
 	
 	// Halfword moves
-`ifdef NOTDEF
-	`aluHMN: result = { LEFT(M), RIGHT(A) };
-	`aluHMZ: result = { LEFT(M), `HALFZERO };
-	`aluHMO: result = { LEFT(M), `HALFMINUSONE };
-	`aluHME: result = { LEFT(M), NEGATIVE(M) ? `HALFMINUSONE : `HALFZERO };
-`else
 	`aluHLL: result = { LEFT(M), RIGHT(A) };
 	`aluHLR: result = { LEFT(A), LEFT(M) };
-`endif // !`ifdef NOTDEF
 
 	`aluSETAlow: { result, resultlow } = { Alow, A }; // Swap A and Alow
 
@@ -395,6 +388,12 @@ module alu
 
 	`aluDPB:		// mask is on Alow, new byte on A, and memory contents on M
 	  result = (Alow & A) | (~Alow & M);
+
+	`aluBPMASK:		// the Byte Pointer mask from M (from size field)
+	  result = bp_mask(S(M));
+
+	`aluBPSHIFT:		// the Byte Pointer shift from M (pointer field)
+	  result = P(M);
 
       endcase // case (command)
    end // always @ (*)

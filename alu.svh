@@ -28,16 +28,8 @@
 `define aluDPB `aluCMDwidth'd13	  // do the masking for Deposit Byte
 
 // Halfword operations
-// this first set is old !!!
-`define aluHMN `aluCMDwidth'd16	// LEFT(M),RIGHT(A)
-`define aluHMZ `aluCMDwidth'd17	// LEFT(M),0
-`define aluHMO `aluCMDwidth'd18	// LEFT(M),-1
-`define aluHME `aluCMDwidth'd19	// LEFT(M),sign(A)
-
 `define aluHLL `aluCMDwidth'd16 // LEFT(M),RIGHT(A)
 `define aluHLR `aluCMDwidth'd17 // LEFT(A),LEFT(M)
-//`define aluHRL `aluCMDwidth'd18 // RIGHT(M),RIGHT(A)
-//`define aluHRR `aluCMDwidth'd19 // LEFT(A),RIGHT(M)
 
 
 `define aluADD `aluCMDwidth'd20	      // A+M
@@ -72,5 +64,5 @@
 `define aluORCB `aluCMDwidth'd46   // ~A | ~M
 `define aluSETO `aluCMDwidth'd47   // -1
 
-
-
+`define aluBPMASK `aluCMDwidth'd48 // bitmask from the size field of a byte pointer in M
+`define aluBPSHIFT `aluCMDwidth'd49 // shift from the pointer field of a byte pointer in M
