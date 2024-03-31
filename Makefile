@@ -17,6 +17,8 @@ apr.check: apr.sv alu.sv barrel.sv $(INCLUDES)
 alu.check: alu.sv alu.svh barrel.sv
 	iverilog -tnull $(ICOPTS) alu.sv barrel.sv
 pag.check: pag.sv $(INCLUDES)
+pidp-10-test.check:
+	iverilog -tnull $(ICOPTS) pidp-10.sv pidp-10-test.sv
 
 tb-apr.vvp: Makefile kv10.hex tb-apr.sv apr.sv alu.sv barrel.sv mem.sv decode.sv pag.sv $(INCLUDES)
 	iverilog $(ICOPTS) -o tb-apr.vvp tb-apr.sv apr.sv alu.sv barrel.sv mem.sv decode.sv pag.sv
@@ -65,7 +67,7 @@ test.am: tb-apr.vvp
 test.qa: tb-apr.vvp
 	./tb-apr.vvp $(SIMOPTS) +file=dabqa.mif
 
-KV10-PRM.pdf: KV10-PRM.tex
+KV10-PRM.pdf: KV10-PRM.tex KV10-PRM.aux KV10-PRM.toc
 	pdflatex KV10-PRM.tex
 
 .SUFFIXES: .sv .check
