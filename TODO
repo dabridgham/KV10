@@ -1,92 +1,76 @@
   -*- Mode: text; fill-column: 90 -*-
 
- o See about using the ALU much less to get more instructions executing in one clock
-   cycle.  I want to get it synthesizing for an FPGA first, to see what that does to the
-   LE count.
-
- o Conversely, run aob and sob through the ALU to save gates.
-
- o Chart all the uses of the ALU and see if I can optimize the muxes down.
-
  o Check everywhere I set arithmetic flags from ALU flags and everywhere I don't.  I think
    I may need to write a new diagnostic for this.  Check the diagnostic against the KLH10
    but also ask on comp.sys.pdp10 if anyone can run it on real hardware.  Note: see pages
    81,82 of the 1973 PRM.
 
+ o Do I set the ALU flags during an interrupt instruction?  Probably shouldn't.
+
  o Pipeline the procesesor.  Then implement branch prediction.
-
- o See about improving MUL and DIV operations.  For divide, look up
-   SRT division and the paper by Vitit Kantabutra (I have it on my
-   laptop).
-
-   http://cs.uns.edu.ar/~jechaiz/arquitectura/division/SRT.html
-
-   There are probably better algorithms for multiply too.  Could just
-   unroll the loop.  Wikipedia talks about Wallace trees, Dadda
-   multipliers, and Booth multipliers.
-
-   See Karatsuba's method for bignums but I don't think that applies here.
-
- o Write a more comprehensive MUL/DIV diagnostic.
 
  o Implement floating-point.
 
  o Check that I can execute instructions out of the Accumulators
 
- o See about moving alu_one to the other ALU input (only used in AOJ and AOS)
-
  o Write diagnositcs for CIRC.
 
  o The diagnostics for ASH and LSH are woefully incomplete.  Write some more.
 
- o Move the AC+1 read and write operations into the memory read/write blocks and see if
-   that reduces LE count.
-
- o Take a close look at the byte instructions with an eye to removing the byte_pointer and
-   byte_pointer_address registers.  Now that the input muxes to the ALU are registers, I
-   can probably use those and the E register to hold what I need.
+ o See about eliminating the BP registers and just adding some ALU operations to handle bytes.
 
  o Learn how the timing analysis work so I can find out how fast I can run.
 
- o Check why I have SWAP going into ALUop2 and also an aluSWAP command that swaps
-   ALUop2. [It's the test instructions that need to AND AC with read_data or E and
-   read_data or E may need to be swapped as well.]
-
- o Merge new and old ALU registers.
- 
- o Optimze use of bp_mask.
-
  o Changes to KI front-panel: user/exec mode, page fault, paging enabled, double fault
-
- o Need to dismiss interrupts when executing a plain instruction and also handle interrupt
-   instructions that skip.  Write diagnostic to check this.  [Learned the the KA10 does
-   not dismiss interrupts when executing a plain instruction while the KI10 does.  I think
-   the KI10 does this right.]
 
  o Make sure that all the various interrupt and UUO handling sets mem_user correctly.
 
  o Think about what I want to do with Unassigned Codes.  Currently I have them acting like
    MUUOs so they pass Dave's diagnostics.
 
- o Make sure I'm handling NXM right through all the stages.
- 
  o Implement and test the PAG feature of relocating locations 0-17 separately.
 
  o Write a 4-way set associative cache.
  
  o Add stats to the cache.
  
- o Move the bp_mask function into the ALU.
-
- o Look into making writing to the ACs at the end of an instruction be driven by the async
-   logic much like writing the ALU flags is.  In fact, try to move as much of the logic in
-   the clocked block to be driven by signals from the async block.
-
  o Verify that PAG clears the AGE bit correctly.
  
- o Implement the quantum timer in PAG
+ o Implement the quantum timer in PAG.  Does it really need to only increment when the APR
+   is in PI 0?
  
  o Check that MUUOs and LUUOs read from the appropriate memory space.
  
  o Decide if I want BLT to count as one instruction or once for each iteration
 
+ o Write diagnostic to test that the processor does the right thing when a higher-priority
+   interrupt happens in between the two instructions of a two instruction interrupt
+   vector.
+
+ o Write diagnostic to check that processor flags aren't set in the case of a memory fault
+ 
+ o JSR and PUSHJ (and JSP?) could benefit by putting PSW,PCnext on Mmux
+ 
+ o Make B be the low word to M instead of A
+ 
+ o Write diagnostic to test interrupt processing: second instruction, skip instructions,
+   nested interrupts
+   
+ o Implement and then test XCTRI.
+ 
+ o The PC input to the Amux could easily be removed.  Could get rid of ACswap as it's only
+   used for BLT and would only add one cycle each time around the loop.
+ 
+ o Handle NXD.  Test NXD.
+
+ o Make sure cycles and instruction_count work when not in the simulator and make them
+   readable from software.  Also, figure out some clever way to display the ratio without
+   having to do a division.
+
+ o Make the console work, either the PiDP-10 or even a real KA10 console if I can get
+   one.  Also, make sure it works without a console ... somehow.
+
+ o Design the indicator panels and write the Verilog to support them.
+
+ o Write diagnostic to check that DPB and IDPB work with indexing and indirect.
+ 

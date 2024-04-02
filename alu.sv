@@ -1,8 +1,6 @@
 //	-*- mode: Verilog; fill-column: 90 -*-
 //
 // Arithmetic and Logic Unit for kv10 processor
-//
-// 2013-01-31 dab	initial version
 
 
 // verilator lint_off LITENDIAN
@@ -10,8 +8,8 @@
 
 `timescale 1 ns / 1 ns
 
-`include "constants.vh"
-`include "alu.vh"
+`include "constants.svh"
+`include "alu.svh"
 
 module alu
    (
@@ -30,7 +28,7 @@ module alu
     output 		     zero
     );
    
-`include "functions.vh"
+`include "functions.svh"
 
    // the adder - The pdp10 has two carry bits, the carry out of bit1
    // into bit0 and the carry out of bit0
@@ -99,6 +97,27 @@ module alu
      else
        posR = A;
 
+	
+   // Add one to both halves.  This is written KI10 style; that is, the
+   // right half does not overflow into the left.
+   wire 		     aovr;
+   wire [`HWORD] 	     al, ar;
+   wire [`WORD] 	     aob;
+   assign { aovr, al } = LEFT(M) + `HALFONE;
+   assign ar = RIGHT(M) + `HALFONE;
+   assign aob = { al, ar };
+
+   // Subtract one from both halves.  This is written KI10 style; that is, the
+   // right half does not overflow into the left.
+   wire 		     sovr;
+   wire [`HWORD] 	     sl, sr;
+   wire [`WORD] 	     sob;
+   assign { sovr, sl } = LEFT(M) - `HALFONE;
+   assign sr = RIGHT(M) - `HALFONE;
+   assign sob = { sl, sr };
+
+
+
 
    // mostly a mux to connect the outputs to the right signal lines
    always @(*) begin
@@ -109,13 +128,14 @@ module alu
       overflow = 0;
       shift_arith = 0;
       shift_rotate = 0;
+      shift72_in = { A, Alow };
       
       // verilator lint_off CASEINCOMPLETE
       case (command)		// synopsys full_case parallel_case
       // verilator lint_on CASEINCOMPLETE
 
-	// logical instructions - command is pulled straight out of the opcode
-	`aluSETZ:	result = 0;
+	// logical instructions
+	`aluSETZ:	result = `ZERO;
 	`aluAND:	result = A & M;
 	`aluSETM:	result = M;
 	`aluANDCA:	result = notA & M;
@@ -136,11 +156,9 @@ module alu
 	`aluSETO:	result = `MINUSONE;
 	
 	// Halfword moves
-	`aluHMN: result = { LEFT(M), RIGHT(A) };
-	`aluHMZ: result = { LEFT(M), `HALFZERO };
-	`aluHMO: result = { LEFT(M), `HALFMINUSONE };
-	`aluHME: result = { LEFT(M), NEGATIVE(M) ? `HALFMINUSONE : `HALFZERO };
-	
+	`aluHLL: result = { LEFT(M), RIGHT(A) };
+	`aluHLR: result = { LEFT(A), LEFT(M) };
+
 	`aluSETAlow: { result, resultlow } = { Alow, A }; // Swap A and Alow
 
 	`aluADD:		// A + M
@@ -186,7 +204,6 @@ module alu
 	  begin
 	     shift_rotate = 0;
 	     shift_arith = 0;
-	     shift72_in = { A, Alow };
 	     result = DLEFT(shift72_out);
 	     resultlow = DRIGHT(shift72_out);
 	  end
@@ -195,7 +212,6 @@ module alu
 	  begin
 	     shift_rotate = 1;
 	     shift_arith = 0;
-	     shift72_in = { A, Alow };
 	     result = DLEFT(shift72_out);
 	     resultlow = DRIGHT(shift72_out);
 	  end
@@ -230,47 +246,47 @@ module alu
 	     resultlow = { A[0], Alow[0:`WORDSIZE-2]};
 	  end
 
-	`aluJFFO:		// Count the number of leading 0s on A
-				// Sets overflow if A is not 0
+	`aluJFFO:		// Count the number of leading 0s on M
+				// Sets overflow if M is not 0
 	  begin
 	     overflow = 1;
 	     case(1'b1)
-		A[0]: result = 0;
-		A[1]: result = 1;
-		A[2]: result = 2;
-		A[3]: result = 3;
-		A[4]: result = 4;
-		A[5]: result = 5;
-		A[6]: result = 6;
-		A[7]: result = 7;
-		A[8]: result = 8;
-		A[9]: result = 9;
-		A[10]: result = 10;
-		A[11]: result = 11;
-		A[12]: result = 12;
-		A[13]: result = 13;
-		A[14]: result = 14;
-		A[15]: result = 15;
-		A[16]: result = 16;
-		A[17]: result = 17;
-		A[18]: result = 18;
-		A[19]: result = 19;
-		A[20]: result = 20;
-		A[21]: result = 21;
-		A[22]: result = 22;
-		A[23]: result = 23;
-		A[24]: result = 24;
-		A[25]: result = 25;
-		A[26]: result = 26;
-		A[27]: result = 27;
-		A[28]: result = 28;
-		A[29]: result = 29;
-		A[30]: result = 30;
-		A[31]: result = 31;
-		A[32]: result = 32;
-		A[33]: result = 33;
-		A[34]: result = 34;
-		A[35]: result = 35;
+		M[0]: result = 0;
+		M[1]: result = 1;
+		M[2]: result = 2;
+		M[3]: result = 3;
+		M[4]: result = 4;
+		M[5]: result = 5;
+		M[6]: result = 6;
+		M[7]: result = 7;
+		M[8]: result = 8;
+		M[9]: result = 9;
+		M[10]: result = 10;
+		M[11]: result = 11;
+		M[12]: result = 12;
+		M[13]: result = 13;
+		M[14]: result = 14;
+		M[15]: result = 15;
+		M[16]: result = 16;
+		M[17]: result = 17;
+		M[18]: result = 18;
+		M[19]: result = 19;
+		M[20]: result = 20;
+		M[21]: result = 21;
+		M[22]: result = 22;
+		M[23]: result = 23;
+		M[24]: result = 24;
+		M[25]: result = 25;
+		M[26]: result = 26;
+		M[27]: result = 27;
+		M[28]: result = 28;
+		M[29]: result = 29;
+		M[30]: result = 30;
+		M[31]: result = 31;
+		M[32]: result = 32;
+		M[33]: result = 33;
+		M[34]: result = 34;
+		M[35]: result = 35;
 		default:
 		  begin
 		     result = 0;
@@ -285,11 +301,12 @@ module alu
 	  else
 	    result = { PlessS(M), S(M), U(M), instI(M), instX(M), instY(M) };
 
-	`aluAOB:		// add 1 to both halves of A
-	  result = AOB(A);
+	`aluAOB:		// add 1 to both halves of M
+	  { overflow, result }  = { aovr, aob };
 
-	`aluSOB:		// subtract 1 from both halves of A
-	  result = SOB(A);
+	`aluSOB:		// subtract 1 from both halves of M
+	  { overflow, result } = { sovr, sob };
+
 
 	// rather specialized operations to implement multiplication
 	`aluMUL_ADD:
@@ -301,7 +318,8 @@ module alu
 	`aluMUL_SUB:
 	  begin
 	     // besides doing the subtraction (optionally), this converts the double-word
-	     // result into two 70-bit words plus the duplicated sign bits
+	     // result into two 70-bit words plus the duplicated sign bits and catches the
+	     // overflow case
 	     if (Alow[35])
 	       { result, resultlow } = { dif, dif[0], Alow[0:34] };
 	     else
@@ -356,19 +374,26 @@ module alu
 	`aluDIV_FIXUP:
 	  // First, adjust R to be positive
 	  // Then, negate R and Q as needed to make everything come out right
+	  // Finally, swap Q and R in the result to make the microcode easier
 	  if (div_neg)
 	    if (NEGATIVE(M))
-	      { result, resultlow } = { -posR, Alow };
+	      { result, resultlow } = { Alow, -posR };
 	    else
-	      { result, resultlow } = { -posR, -Alow };
+	      { result, resultlow } = { -Alow, -posR };
 	  else
 	    if (NEGATIVE(M))
-	      { result, resultlow } = { posR, -Alow };
+	      { result, resultlow } = { -Alow, posR };
 	    else
-	      { result, resultlow } = { posR, Alow };
+	      { result, resultlow } = { Alow, posR };
 
 	`aluDPB:		// mask is on Alow, new byte on A, and memory contents on M
 	  result = (Alow & A) | (~Alow & M);
+
+	`aluBPMASK:		// the Byte Pointer mask from M (from size field)
+	  result = bp_mask(S(M));
+
+	`aluBPSHIFT:		// the Byte Pointer shift from M (pointer field)
+	  result = P(M);
 
       endcase // case (command)
    end // always @ (*)

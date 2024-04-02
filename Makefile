@@ -1,20 +1,30 @@
-ICOPTS = -DSIM -Wall -Wno-implicit-dimensions
+ICOPTS = -DSIM -Wall -Wno-implicit-dimensions -g2012
 SIMOPTS = -N
-INCLUDES =  alu.vh constants.vh disasm.vh functions.vh io.vh opcodes.vh decode.vh
+INCLUDES = kv10.svh alu.svh constants.svh disasm.svh functions.svh io.svh opcodes.svh
+LINTOPTS = --lint-only -Wno-LITENDIAN -DLINT
 
-ALL: alu.check apr.check sram.check mem-sram.check mem.check pag.check cache.check
 
-apr.check: apr.v alu.v decode.v barrel.v $(INCLUDES)
-	iverilog -tnull $(ICOPTS) apr.v alu.v decode.v barrel.v
-alu.check: alu.v alu.vh barrel.v
-	iverilog -tnull $(ICOPTS) alu.v barrel.v
-pag.check: pag.v $(INCLUDES)
+check: alu.check apr.check sram.check mem-sram.check mem.check pag.check cache.check
 
-tb-apr.vvp: Makefile tb-apr.v apr.v alu.v decode.v barrel.v mem.v $(INCLUDES)
-	iverilog $(ICOPTS) -o tb-apr.vvp tb-apr.v apr.v alu.v decode.v barrel.v mem.v
+ver:
+	verilator $(LINTOPTS) --top-module apr_tb tb-apr.sv apr.sv barrel.sv pag.sv
+#	verilator $(LINTOPTS) apr.v barrel.v
+#	verilator $(LINTOPTS) pag.sv
 
-tb-alu.vvp: tb-alu.v alu.v barrel.v alu.vh
-	iverilog -o tb-alu.vvp tb-alu.v alu.v barrel.v
+
+apr.check: apr.sv alu.sv barrel.sv $(INCLUDES)
+	iverilog -tnull $(ICOPTS) apr.sv alu.sv decode.sv barrel.sv
+alu.check: alu.sv alu.svh barrel.sv
+	iverilog -tnull $(ICOPTS) alu.sv barrel.sv
+pag.check: pag.sv $(INCLUDES)
+pidp-10-test.check:
+	iverilog -tnull $(ICOPTS) pidp-10.sv pidp-10-test.sv
+
+tb-apr.vvp: Makefile kv10.hex tb-apr.sv apr.sv alu.sv barrel.sv mem.sv decode.sv pag.sv $(INCLUDES)
+	iverilog $(ICOPTS) -o tb-apr.vvp tb-apr.sv apr.sv alu.sv barrel.sv mem.sv decode.sv pag.sv
+
+tb-alu.vvp: tb-alu.v alu.sv barrel.sv alu.svh
+	iverilog -o tb-alu.vvp tb-alu.sv alu.sv barrel.sv
 
 tb-alu.lxt: tb-alu.vvp
 	./tb-alu.vvp
@@ -22,8 +32,8 @@ tb-alu.lxt: tb-alu.vvp
 test.alu: tb-alu.lxt
 	./tb-alu.vvp
 
-save:
-	cp -a Makefile *.v *.vh saved
+kv10.hex: kv10.asm kv10.def
+	uas kv10.def kv10.asm kv10.hex kv10.lst
 
 test: test.aa test.ab test.ac test.ad test.ae test.af test.ag test.ai test.aj test.ak test.al test.am
 
@@ -57,11 +67,11 @@ test.am: tb-apr.vvp
 test.qa: tb-apr.vvp
 	./tb-apr.vvp $(SIMOPTS) +file=dabqa.mif
 
-KV10-PRM.pdf: KV10-PRM.tex
+KV10-PRM.pdf: KV10-PRM.tex KV10-PRM.aux KV10-PRM.toc
 	pdflatex KV10-PRM.tex
 
-.SUFFIXES: .v .check
+.SUFFIXES: .sv .check
 
 # Test compile to check for error
-.v.check:
+.sv.check:
 	iverilog -tnull $(ICOPTS) $<

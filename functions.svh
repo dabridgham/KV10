@@ -1,8 +1,6 @@
 // 	-*- mode: Verilog; fill-column: 90 -*-
 //
 // Utility functions
-//
-// 2013-02-03 dab	initial version
 
 
 // Pull apart words
@@ -57,36 +55,10 @@ function [`DWORD] DMAGNITUDE;
 endfunction
 
 
-// Add one to both halves.  This is written KI10 style; that is, the
-// right half does not overflow into the left.
-function [`WORD] AOB;
-   input [`WORD]    w;
-   reg [`HWORD]     l;
-   reg [`HWORD]     r;
-   begin
-      l = LEFT(w) + `HALFSIZE'd1;
-      r = RIGHT(w) + `HALFSIZE'd1;
-      AOB = { l, r };
-   end
-endfunction
-
-// Subtract one from both halves.  This is written KI10 style; that is, the
-// right half does not overflow into the left.
-function [`WORD] SOB;
-   input [`WORD]    w;
-   reg [`HWORD]     l;
-   reg [`HWORD]     r;
-   begin
-      l = LEFT(w) - `HALFSIZE'd1;
-      r = RIGHT(w) - `HALFSIZE'd1;
-      SOB = { l, r };
-   end
-endfunction
-
 // Returns 1 of the address references ACs
 function isAC;
-   input [`ADDR] addr;
-   isAC = ((addr & `ADDRSIZE'o777760) == 0);
+   input [`ADDR] add;
+   isAC = ((add & `ADDRSIZE'o777760) == 0);
 endfunction
 
 

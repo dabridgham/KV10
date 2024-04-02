@@ -573,27 +573,3 @@ end // initial begin
       end
    endfunction
 
-   task print_ac;
-      begin
-	 $display("0: %o,%o  4: %o,%o  10: %o,%o  14: %o,%o",
-		  accumulators[0][0:17], accumulators[0][18:35],
-		  accumulators[4][0:17], accumulators[4][18:35],
-		  accumulators[8][0:17], accumulators[8][18:35],
-		  accumulators[12][0:17], accumulators[12][18:35]);
-	 $display("1: %o,%o  5: %o,%o  11: %o,%o  15: %o,%o",
-		  accumulators[1][0:17], accumulators[1][18:35],
-		  accumulators[5][0:17], accumulators[5][18:35],
-		  accumulators[9][0:17], accumulators[9][18:35],
-		  accumulators[13][0:17], accumulators[13][18:35]);
-	 $display("2: %o,%o  6: %o,%o  12: %o,%o  16: %o,%o",
-		  accumulators[2][0:17], accumulators[2][18:35],
-		  accumulators[6][0:17], accumulators[6][18:35],
-		  accumulators[10][0:17], accumulators[10][18:35],
-		  accumulators[14][0:17], accumulators[14][18:35]);
-	 $display("3: %o,%o  7: %o,%o  13: %o,%o  17: %o,%o",
-		  accumulators[3][0:17], accumulators[3][18:35],
-		  accumulators[7][0:17], accumulators[7][18:35],
-		  accumulators[11][0:17], accumulators[11][18:35],
-		  accumulators[15][0:17], accumulators[15][18:35]);
-      end
-   endtask // print_ac

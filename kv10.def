@@ -1,0 +1,237 @@
+# 'uas' configuration file for the KV10 uengine
+#
+# The contents consist of a number of lines containing tokens; the order
+# of the lines, and the tokens that each contains, are fixed.
+#
+# Tokens are separated by white space (either space or tab - extra white
+# space is ignored); blank lines are ignored, and comment lines _start_ with
+# a '#', ';', or '/'.
+#
+# Numeric items are either octal (leading "0"), decimal or hexadecimal
+# (with a leading "0x"; uppercase A-F only).
+
+# The first line _must_ contain the uword width, and uROM size
+
+64 2048
+
+# The second line _must_ contain the format strings used for printing addresses,
+# uinsts, and literals
+
+0%04o 0%022llo 0%04o
+
+# Next comes a block of lines containing the field definitions: it starts with
+# a line containing the number of field definitions, then the definitions,
+# one field per line, and finally a line with only a '.' to mark the end of
+# the table. (The number, and terminator, are there as cross-checks.)
+#
+# Each field definition line contains: the field name (a string), the
+# default value for that field (a string; 'none' if none), the location of
+# the start bit for the field, the number of bits in the field, and two
+# control tokens (strings, here, using names defined in uas.c) which are
+# used in dis-assembling uinsts when producing a ucode listing.
+#
+# The first token says what form the field takes (a bit string, an ordinal,
+# or a literal); the second token says how the literal field is used (if
+# it is used with this field). 'none' is an acceptable value for the
+# second token, but not the first. The literal use token also indicates
+# whether all values for this field use the literal, or only some;
+# a leading 'v' in the token indicates the latter.
+#
+# The start bits for each field are given, as well as the field width, as
+# a cross-check - it does make a little work if a field is inserted in the
+# middle of the uword, but it was felt that this price was worth paying
+# for the benefit of being able to do a consistency check.
+
+35
+
+# not using the halt bit anymore but keep it around so the
+# microassembler is happy that we're using the entire microword.
+uhalt		none	63	1	bit	none
+
+udisint		none	61	1	bit	none
+umulstart	none	60	1	bit	none
+usetnodiv	none	59	1	bit	none
+usetfpd		none	58	1	bit	none
+uclrfpd		none	57	1	bit	none
+usetovf		none	56	1	bit	none
+uclrflags	none	55	1	bit	none
+usetflags	none	54	1	bit	none
+usetpdo		none	53	1	bit	none
+usetuser	none	52	1	bit	none
+uloadpsw	none	51	1	bit	none
+uacnext		none	50	1	bit	none
+usetmuuo	none	49	1	bit	none
+uloadbp		none	48	1	bit	none
+uloady		none	47	1	bit	none
+uloadix		none	46	1	bit	none
+uloadopa	none	45	1	bit	none
+uswapm		none	44	1	bit	none
+
+upcload		none	42	1	bit	none
+uloadm		none	41	1	bit	none
+uloada		none	40	1	bit	none
+uloadb		none	39	1	bit	none
+uwriteac	none	38	1	bit	none
+uwriteio	none	37	1	bit	none
+ureadio		none	36	1	bit	none
+uwritemem	none	35	1	bit	none
+ureadmem	none	34	1	bit	none
+umemclass	none	31	3	ord	none
+usaveflags 	none	30	1	bit	none
+alucmd		none	24	6	ord	none
+asel		none	20	4	ord	none
+msel		none	16	4	ord	none
+ubranch		jump	11	5	ord	none
+literal		none	0	11	lit	lbl
+
+.
+
+# Finally, a block of lines containing the field value definitions: like
+# the previous section, it starts with a line containing the number of
+# value definitions, then the definitions themselves, one per line, and
+# finally a line with only a '.' to mark the end of the table.
+#
+# Each value definition line contains: the value name (a string), the
+# field that value belongs to (another string), the numeric value of
+# that value (relative to the field - 'uas' will convert it to the
+# correct value to go in the uword), and one control token (a string,
+# here) used in dis-assembling uinsts.
+#
+# That token says if the literal field is used for this value (if it is
+# used with some, but not all, values of that field). 'yes' and 'no' are
+# the acceptable values for this token.
+
+118
+
+disINT		udisint		1	no
+mulstart	umulstart	1	no
+setNODIV	usetnodiv	1	no
+setFPD		usetfpd		1	no
+clrFPD		uclrfpd		1	no
+setOVF		usetovf		1	no
+setPDO		usetpdo		1	no
+clrFLAGS	uclrflags	1	no
+setFLAGS	usetflags	1	no
+saveFLAGS	usaveflags	1	no
+setUSER		usetuser	1	no
+setMUUO		usetmuuo	1	no
+
+loadPSW		uloadpsw	1	no
+ACnext		uacnext		1	no
+loadBP		uloadbp		1	no
+loadY		uloady		1	no
+loadIX		uloadix		1	no
+loadOPA		uloadopa	1	no
+swapM		uswapm		1	no
+loadPC		upcload 	1	no
+loadM		uloadm		1	no
+loadA		uloada		1	no
+loadB		uloadb		1	no
+writeAC		uwriteac	1	no
+
+memE1		umemclass	0	no
+memD1		umemclass	1	no
+memE2		umemclass	2	no
+memD2		umemclass	3	no
+memIF		umemclass	4	no
+
+writeIO		uwriteio	1	no
+readIO 		ureadio		1	no
+writeMEM	uwritemem	1	no
+readMEM		ureadmem	1	no
+
+
+aZERO	asel	0	no
+aONE	asel	1	no
+aMONE	asel	2	no
+aINIT	asel	3	no
+aSXT	asel	4	no
+aVECTOR	asel	5	no
+aA	asel	6	no
+aPC	asel	7	no
+aPCnext	asel	8	no
+aPCskip	asel	9	no
+aAC	asel	10	no
+#aSWAP	asel	11	no
+aBPMASK	asel	12	no
+aM	asel	13	no
+aE	asel	14	no
+aX	asel	15	no
+
+mM	msel	0	no
+mAC	msel	1	no
+mBPP	msel	2	no
+mBPPNEG	msel	3	no
+mE	msel	4	no
+mMEM	msel	5	no
+mIO	msel	6	no
+mINST	msel	7	no
+
+# this is a hack.  For the moment, alucmd=0 isn't used.
+halt		alucmd	0	no
+
+aluIBP		alucmd	1	no
+aluSETB		alucmd	2	no
+aluAOB		alucmd	3	no
+aluSOB		alucmd	4	no
+aluMULADD	alucmd	5	no
+aluMULSUB	alucmd	6	no
+aluIMULSUB	alucmd	7	no
+aluDIVMAG72	alucmd	8	no
+aluDIVMAG36	alucmd	9	no
+aluDIVOP	alucmd	10	no
+aluDIVFIXR	alucmd	11	no
+aluDIVFIXUP	alucmd	12	no
+aluDPB		alucmd	13	no
+aluHLL		alucmd	16	no
+aluHLR		alucmd	17	no
+aluADD		alucmd	20	no
+aluSUB		alucmd	21	no
+aluMAGNITUDE	alucmd	22	no
+aluNEGATE	alucmd	23	no
+aluLSH		alucmd	24	no
+aluASH		alucmd	25	no
+aluROT		alucmd	26	no
+aluLSHC		alucmd	27	no
+aluASHC		alucmd	28	no
+aluROTC		alucmd	29	no
+aluCIRC		alucmd	30	no
+aluJFFO		alucmd	31	no
+aluSETZ		alucmd	32	no
+aluAND		alucmd	33	no
+aluANDCA	alucmd	34	no
+aluSETM		alucmd	35	no
+aluANDCM	alucmd	36	no
+aluSETA		alucmd	37	no
+aluXOR		alucmd	38	no
+aluIOR		alucmd	39	no
+aluANDCB	alucmd	40	no
+aluEQV		alucmd	41	no
+aluSETCA	alucmd	42	no
+aluORCA		alucmd	43	no
+aluSETCM	alucmd	44	no
+aluORCM		alucmd	45	no
+aluORCB		alucmd	46	no
+aluSETO		alucmd	47	no
+
+jump		ubranch	0	yes
+brREAD		ubranch	1	yes
+brWRITE		ubranch	2	yes
+brIX		ubranch	3	yes
+brI		ubranch	4	yes
+brDISPATCH	ubranch	5	yes
+brCOMP		ubranch	6	yes
+brCOMP0		ubranch	7	yes
+brSELF		ubranch	8	yes
+brTEST		ubranch	9	yes
+brJFCL		ubranch	10	yes
+brMUL		ubranch	11	yes
+brOVR		ubranch 12	yes
+brBPDISP	ubranch	13	yes
+brFPD		ubranch 14	yes
+brBLTDONE	ubranch	15	yes
+brIOREAD	ubranch	16	yes
+brIOWRITE	ubranch	17	yes
+
+.
+

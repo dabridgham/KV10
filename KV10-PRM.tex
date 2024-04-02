@@ -1,5 +1,6 @@
+% -*- mode: latex; fill-column: 96 -*-
+
 \documentclass[12pt]{report}
-%Gummi|065|=)
 \pagestyle{headings}
 
 %\usepackage{fullpage}
@@ -264,6 +265,13 @@ providing a useful set of I/O ports.  This will be called Ammonite.
 
 \section{Instructions}
 
+\subsubsection{JRST}
+
+The \code{JRST} instruction works like on the KA10, with the four bits of the AC field enabling
+special functions.  However, the microcode dispatches to 16 locations allowing for more
+variations.  In particular, I'm considering adding a \code{JRST} that halts but leaves
+interrupts enabled like Wait for Interrupt from the PDP-11.
+
 \subsubsection{CIRC - Circulate}
 
 \begin{register36}
@@ -327,41 +335,35 @@ any instruction makes sense there and most haven't been tested.  There are three
 classes of instruction that have different effects when used as an interrupt instruction.
 
 \begin{description}
-  \item[jumps] Instructions which cause a jump will clear the CM flag (put the processor
-    in exec mode) and jump to the destination address as per the instruction.  \code{JSR}
-    is the typical example of this and the most commonly used interrupt instruction.  The
-    interrupt service routine is expected to clear the condition causing the interrupt (if
-    needed) and dismiss the interrupt with \code{JEN}.
-  \item[skips] For instructions that may skip, if they do not skip then they execute the
-    instruction at 41+2*N (where N is the PI channel number) as an interrupt instruction.
-    If \emph{that} instruction may skip, the action of the APR is undefined.  If the
-    instruction does skip, then the interrupt is dismissed and the interrupted program
-    continues.
+  \item[JSR, JSP, PUSHJ, JSA, or JRST] These instructions will clear the CM flag (put the
+    processor in exec mode) and jump to the destination address as per the instruction.
+    \code{JSR} is the typical example of this and the most commonly used interrupt
+    instruction.  The interrupt service routine is expected to clear the condition causing
+    the interrupt (if needed) and dismiss the interrupt with \code{JEN}.\footnote{The KI10
+      allows MUUO instructions as interrupt instructions.  This might work but has not
+      been tested.}
 
-    This is here for the \code{BLKO} and \code{BLKI} instructions.  Since implementing
-    this requires specific code to be added for each instruction that skips, I may or may
-    not add the capability to other instructions.
-  \item[everything else] Instructions that normally proceed to the next instruction take
-    their action then dismiss the interrupt and return to the interrupted program.  This
-    differs from the KA10 but is like the KI10 and later models.
+  \item[AOSx, SKIPx, SOSx, CONSx, or BLKx] If the skip condition is satisfied, then the
+    APR dismisses the interrupt and returns to the interrupted program.  If the skip
+    condition is not satisfied, the instruction in the second interrupt location for the
+    channel is executed as an interrupt instruction.
+
+  \item[everything else] All other instructions take their action then dismiss the interrupt and
+    return to the interrupted program.  This differs from the KA10 but is like the KI10 and
+    later models.  Differing from the KI10, jump and skip instructions (other than those listed
+    above) do not jump or skip but simply return to the interrupted instruction.
 \end{description}
 
 \subsection{Unassigned Codes}
 
-\marginpar{\raggedright \tiny The unassigned codes are 100-107, 114-117, 123, and (if
-  \code{CIRC} is not included) 247.}The KA10 handles unassigned codes much like MUUOs
+\marginpar{\raggedright \tiny The unassigned codes are 100-107, 114-117, 123, 247 (if
+  \code{CIRC} is not included), and 257.}The KA10 handles unassigned codes much like MUUOs
 except they go through locations 60 and 61 rather than 40 and 41.  The KX10 sends both
 MUUOs and unassigned codes through locations 40 and 41.  The KV10 may do it either way and
 is controlled through the \texttt{UAC} option in \texttt{constants.vh}.  Defining
 \texttt{UAC} causes the KV10 to use locations 60 and 61 for unassigned code processing.
 \footnote{At some point I expect I will settle on one or the other and remove this compile
   option.}
-
-\subsection{Errors}
-
-The KX10 defines hard errors as coming from I/O operations to non-existent devices.  The
-KV10 may also generate hard errors on accessing non-existent memory if the MEM module is
-capable of detecting and signaling this condition.
 
 \chapter{Input / Output}
 
@@ -422,6 +424,8 @@ described in here as they're just operations on top of the base of \code{CONI},
   \bit{32}{T\\I\\R}
 \end{register36}
 
+See PDP-10/X documentation.
+
 \subsubsection{CONO APR, E}
 
 \begin{register36}
@@ -440,6 +444,8 @@ described in here as they're just operations on top of the base of \code{CONI},
   \bit{30}{M\\U\\1}
   \bits{33}{35}{I\\A}
 \end{register36} 
+
+See PDP-10/X documentation.
 
 \subsubsection{DATAI APR, E}
 \subsubsection{DATAO APR, E}
@@ -488,6 +494,8 @@ front of the computer and it can't be changed manually.
   \bit{35}{L\\E\\7}
 \end{register36}
 
+See PDP-10/X documentation.
+
 \subsubsection{CONO PI, E}
 
 \begin{register36}
@@ -506,6 +514,8 @@ front of the computer and it can't be changed manually.
   \bit{34}{L\\6}
   \bit{35}{L\\7}
 \end{register36}
+
+See PDP-10/X documentation.
 
 \subsubsection{DATAO PI, E}
 
@@ -597,6 +607,110 @@ file (in the sense of the \code{XCT} instruction) so if you arrange to put some 
 instruction at the end of your .SAV file, you may get unexpected results.  Or perhaps
 that's what you wanted to happen.
 
+
+\chapter{Internals}
+
+The KV10 is a horizontal micro-code machine with a 64 bit micro-word.\footnote{Currently not all
+  bits are used and this is subject to change as more is implemented.}  The data-paths are shown
+in Figure \ref{datapaths}.
+
+
+\begin{figure}
+  \includegraphics[width=\textwidth]{data-paths/dp.pdf}
+  \caption{KV10 Data Paths}
+  \label{datapaths}
+  \end{figure}
+
+A key aspect to the micro-engine is the conditional branches that are available to the
+micro-code.  These branches are OR'd into the next micro-address, therefore requiring that
+branch destinations be suitably aligned.
+
+\begin{description}
+\item[brJUMP]
+  The default is just to transfer to the next micro-instruction as specified by the next
+  instruction field of the micro-instruction.
+\item[brREAD]
+  A two-way branch that allows waiting for the read ack to appear when reading memory.  The read
+  data will be read one clock cycle after the ack.  The address does not have to be held on
+  mem\_addr after mem\_read is asserted.
+\item[brWRITE]
+  A two-way branch that allows waiting for the write ack to appear when writing to memory.  The
+  address and data to be written do not have to be held after mem\_write is asserted.
+\item[brIX] A three-way branch on the Index and Indirect fields of an instruction to allow for
+  effective address calculation.  This is currently taken from \code{write\_data} rather than
+  \code{inst} because we want to do the branch one cycle early.  Indexing takes priority since
+  we want to do that calculation first.
+  \begin{description}
+  \item[0] Index is non-zero
+  \item[1] Indirect
+  \item[2] Otherwise
+  \end{description}
+\item[brI] If we process a Index during the Effective Address calculation, then we need to come
+  back and check for Indirect.  This check is for that and operates off the \code{inst} register
+  since the instruction will have been written by now.
+\item[brDISPATCH] This is a complicated branch that handles a variety of different tasks, all
+  put into a single branch to save cycles.  It is primarily driven from the instruction decode
+  ROM.  The default is that the branch dispatch is the opcode of the instruction.
+
+  Instructions that read the contents of the memory at the effective address branch to $740_8$
+  to execute that read.  An internal flag is set so when the instruction is dispatched again, it
+  doesn't just read the contents at E again.
+
+  Some instructions get special dispatching, namely \code{JRST} and the I/O
+  instructions.\footnote{Eventually I wish to attempt merging more of the effective address
+    calculations into brDISPATCH to save a clock cycle on any instructions that don't use
+    Indexing or Indirection.}
+\item[brCOMP]
+  Branch if the comparison (as specified from the instruction decode) matches.
+\item[brCOMP0]
+  Branch if the comparison with 0 (as specified from the instruction decode) matches.
+\item[brSELF]
+  For instructions that write to self, check if AC is not equal to 0.
+\item[brTEST]
+  Branch if the bitwise AND of the A and M inputs to the ALU is not 0.  This is used for the
+  \code{TEST} instructions.
+\item[brJFCL]
+  For the \code{JFCL} instruction, branch if and of the processor flags are about to be cleared.
+\item[brMUL]
+  An 8-way branch for the different \code{MUL} and \code{DIV} instructions.
+  \begin{description}
+  \item[0] \code{IMUL}/\code{IDIV}
+  \item[1] \code{IMULI}/\code{IDIVI}
+  \item[2] \code{IMULM}/\code{IDIVM}
+  \item[3] \code{IMULB}/\code{IDIVB}
+  \item[4] \code{MUL}/\code{DIV}
+  \item[5] \code{MULI}/\code{DIVI}
+  \item[6] \code{MULM}/\code{DIVM}
+  \item[7] \code{MULB}/\code{DIVB}
+  \end{description}
+\item[brOVR]
+  Branch if the ALU is indicating overflow.
+\item[brBPDISP]
+  A 4-way branch for the different Byte instructions.
+  \begin{description}
+  \item[0] \code{ILDB}
+  \item[1] \code{LDB}
+  \item[2] \code{LDPB}
+  \item[3] \code{DPB}
+  \end{description}
+\item[brFPD]
+  Branch if the First Part Done flag is set.
+\item[brBLTDONE]
+  Branch if RIGHT(AC) equals E -- used for terminating \code{BLT}.
+\item[brIOREAD]
+  Branch when we receive the ack for an I/O read.
+\item[brIOWRITE]
+  Branch when we receive the ack for an I/O write.
+\end{description}
+
+During a memory read we may receive an interrupt.  In this case the micro-engine immediately
+jumps to location $777_8$ to begin the interrupt processing.
+
+During a memory read or write we may receive a page fault.  In this case the micro-engine
+immediately jumps to location $775_8$ which simply aborts the current instruction execution and
+begins again.  If interrupts are set up correctly, the attempt to fetch the instruction will be
+blocked and the interrupt will be taken.  If not, this is a double-error.\footnote{Need to
+  implement double errors.}
 
 \begin{thebibliography}{9}
 

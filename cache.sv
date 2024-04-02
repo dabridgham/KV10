@@ -6,7 +6,7 @@
 //
 // 2015-01-25 dab	initial version
 
-`include "constants.vh"
+`include "constants.svh"
 
 module cache
   (
@@ -46,8 +46,8 @@ module cache
    input [1:7] 		io_pi_in
    );
 
-`include "functions.vh"
-`include "io.vh"
+`include "functions.svh"
+`include "io.svh"
    
    parameter 
      cacheaddr = 9,		// log2 of number of lines in cache
