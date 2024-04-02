@@ -5,6 +5,8 @@
    but also ask on comp.sys.pdp10 if anyone can run it on real hardware.  Note: see pages
    81,82 of the 1973 PRM.
 
+ o Do I set the ALU flags during an interrupt instruction?  Probably shouldn't.
+
  o Pipeline the procesesor.  Then implement branch prediction.
 
  o Implement floating-point.
